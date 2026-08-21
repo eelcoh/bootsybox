@@ -1,0 +1,6 @@
+[terminal]
+vt = 1
+
+[default_session]
+command = "agreety --cmd /usr/local/bin/launch-user-container.sh"
+user = "greeter"

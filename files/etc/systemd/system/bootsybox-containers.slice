@@ -1,0 +1,8 @@
+[Unit]
+Description=Resource limits for user desktop containers
+
+[Slice]
+CPUQuota=400%
+CPUWeight=100
+MemoryMax=8G
+MemorySwapMax=2G
