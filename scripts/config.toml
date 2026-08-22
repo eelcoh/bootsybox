@@ -1,0 +1,5 @@
+[[customizations.user]]
+name = "testuser"
+password = "testpass"                                                                                                                                                    
+groups = ["wheel", "bootsybox-seat"]
+key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEpFnRKx2ZNdK8CBOcaQByEOMOCmCdrU6BY0gSlcLtMR ehoekema@gmail.com"
