@@ -13,7 +13,7 @@ RUN dnf -y install \
 # login prompt and any debug output under SELinux/PAM noise.
 RUN systemctl enable auditd
 
-RUN mkdir -p /etc/skel/.config
+RUN mkdir -p /usr/share/bootsybox
 
 # seatd owns the physical seat on the host and passes already-open DRM/input
 # file descriptors to compositors over /run/seatd.sock. Desktop users only
@@ -25,8 +25,8 @@ COPY files/etc/greetd/config.toml /etc/greetd/config.toml
 COPY files/etc/systemd/system/seatd.service.d/10-bootsybox.conf /etc/systemd/system/seatd.service.d/10-bootsybox.conf
 COPY files/etc/systemd/system/greetd.service.d/10-seatd.conf /etc/systemd/system/greetd.service.d/10-seatd.conf
 COPY files/etc/systemd/system/bootsybox-containers.slice /etc/systemd/system/bootsybox-containers.slice
-COPY files/etc/skel/.config/startup.sh /etc/skel/.config/startup.sh
+COPY files/usr/share/bootsybox/desktop-image /usr/share/bootsybox/desktop-image
 
-RUN chmod +x /usr/local/bin/launch-user-container.sh /etc/skel/.config/startup.sh
+RUN chmod 0755 /usr/local/bin/launch-user-container.sh
 
 RUN systemctl enable seatd greetd

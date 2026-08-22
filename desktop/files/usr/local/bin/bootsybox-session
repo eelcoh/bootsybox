@@ -1,0 +1,63 @@
+#!/bin/bash
+set -euo pipefail
+
+LOG_DIR="$HOME/.local/state/bootsybox"
+mkdir -p "$LOG_DIR"
+exec > >(tee -a "$LOG_DIR/session.log") 2>&1
+echo "[$(date -Is)] desktop session starting (pid $$)"
+
+unset DISPLAY WAYLAND_DISPLAY NIRI_SOCKET
+export XDG_SESSION_TYPE=wayland
+export XDG_SESSION_DESKTOP=niri
+export XDG_CURRENT_DESKTOP=niri
+export LIBSEAT_BACKEND=seatd
+export SEATD_SOCK=/run/seatd.sock
+
+if [ ! -S "$SEATD_SOCK" ]; then
+    echo "Host seatd socket is unavailable: $SEATD_SOCK" >&2
+    exit 1
+fi
+
+# A per-user remote persists in the bind-mounted home and avoids depending on
+# a system Flatpak helper inside this deliberately non-systemd container.
+if ! flatpak remote-add --user --if-not-exists \
+    flathub https://dl.flathub.org/repo/flathub.flatpakrepo; then
+    echo "warning: could not configure Flathub; continuing without it" >&2
+fi
+
+# niri must create WAYLAND_DISPLAY itself. Once the socket exists, publish the
+# resulting environment to D-Bus activation and start portal services. Starting
+# xdg-desktop-portal explicitly is necessary because this container intentionally
+# has no systemd user manager.
+exec dbus-run-session -- bash -c '
+    (
+        for _ in $(seq 1 100); do
+            for socket in "$XDG_RUNTIME_DIR"/wayland-*; do
+                if [ -S "$socket" ]; then
+                    WAYLAND_DISPLAY=${socket##*/}
+                    export WAYLAND_DISPLAY
+                    for niri_socket in "$XDG_RUNTIME_DIR"/niri."$WAYLAND_DISPLAY".*.sock; do
+                        if [ -S "$niri_socket" ]; then
+                            NIRI_SOCKET=$niri_socket
+                            export NIRI_SOCKET
+                            break
+                        fi
+                    done
+                    dbus-update-activation-environment \
+                        WAYLAND_DISPLAY \
+                        XDG_CURRENT_DESKTOP \
+                        XDG_SESSION_DESKTOP \
+                        XDG_SESSION_TYPE \
+                        NIRI_SOCKET
+                    gnome-keyring-daemon --start --components=secrets
+                    mako &
+                    /usr/libexec/xdg-desktop-portal &
+                    exit 0
+                fi
+            done
+            sleep 0.05
+        done
+        echo "Timed out waiting for niri Wayland socket" >&2
+    ) &
+    exec niri --session
+'

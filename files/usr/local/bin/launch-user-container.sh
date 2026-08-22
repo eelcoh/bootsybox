@@ -1,6 +1,7 @@
 #!/bin/bash
-# Runs on the bootc host as the user authenticated by greetd. Creates or starts
-# that user's rootless desktop container and waits for its compositor session.
+# Runs on the bootc host as the user authenticated by greetd. It keeps the
+# replaceable outer container synchronized with the declared desktop image,
+# starts it, and waits for the graphical session to end.
 set -euo pipefail
 
 USER=$(id -un)
@@ -9,23 +10,52 @@ USER_GID=$(id -g)
 CONTAINER_NAME="desktop-env-$USER"
 XDG_RUNTIME_DIR="/run/user/$USER_UID"
 SEATD_SOCK=/run/seatd.sock
+DESKTOP_IMAGE_FILE=/usr/share/bootsybox/desktop-image
 
 if [ ! -S "$SEATD_SOCK" ]; then
     echo "Host seat broker is unavailable: $SEATD_SOCK" >&2
     exit 1
 fi
 
+if [ ! -r "$DESKTOP_IMAGE_FILE" ]; then
+    echo "Desktop image declaration is missing: $DESKTOP_IMAGE_FILE" >&2
+    exit 1
+fi
+
+DESKTOP_IMAGE=$(tr -d '[:space:]' < "$DESKTOP_IMAGE_FILE")
+if [ -z "$DESKTOP_IMAGE" ]; then
+    echo "Desktop image declaration is empty: $DESKTOP_IMAGE_FILE" >&2
+    exit 1
+fi
+
+echo "Synchronizing desktop image: $DESKTOP_IMAGE"
+if ! podman pull --quiet "$DESKTOP_IMAGE"; then
+    if podman image exists "$DESKTOP_IMAGE"; then
+        echo "warning: pull failed; using the cached desktop image" >&2
+    else
+        echo "Unable to pull $DESKTOP_IMAGE and no cached image is available" >&2
+        exit 1
+    fi
+fi
+
+DESIRED_IMAGE_ID=$(podman image inspect --format '{{.Id}}' "$DESKTOP_IMAGE")
+
+if podman container exists "$CONTAINER_NAME"; then
+    CURRENT_IMAGE_ID=$(podman container inspect --format '{{.Image}}' "$CONTAINER_NAME")
+    if [ "$CURRENT_IMAGE_ID" != "$DESIRED_IMAGE_ID" ]; then
+        echo "Replacing outdated desktop container; home data is preserved"
+        podman rm --force "$CONTAINER_NAME"
+    fi
+fi
+
 if ! podman container exists "$CONTAINER_NAME"; then
-    # keep-id lets the compositor and home files use the authenticated user's
-    # real UID. keep-groups retains bootsybox-seat, which authorizes access to
-    # the host seatd socket. seatd owns the VT and devices and passes already-
-    # opened file descriptors to the compositor, so no direct VT/input access,
-    # host PID namespace, or privileged container is needed. A read-only DRM
-    # directory is present only so udev/Smithay can discover device paths.
+    # keep-id maps the graphical user to their host UID. keep-groups retains
+    # bootsybox-seat, authorizing the seatd connection. seatd performs the
+    # privileged VT/input/DRM opens; the read-only DRM view exists for device
+    # discovery, not direct seat ownership.
     #
-    # SELinux label separation is disabled for this prototype because neither
-    # an existing home nor a shared host socket can safely receive a private
-    # container label. User, mount, PID, IPC and network namespaces remain.
+    # SELinux label separation remains disabled while an existing home and a
+    # host Unix socket are shared. Other Podman namespaces remain enabled.
     podman create \
         --name "$CONTAINER_NAME" \
         --user root \
@@ -35,21 +65,25 @@ if ! podman container exists "$CONTAINER_NAME"; then
         --cgroup-parent=bootsybox-containers.slice \
         --security-opt label=disable \
         --device /dev/fuse \
+        -e BOOTSYBOX_USER="$USER" \
+        -e BOOTSYBOX_UID="$USER_UID" \
+        -e BOOTSYBOX_GID="$USER_GID" \
         -v "$SEATD_SOCK:$SEATD_SOCK:rw" \
         -v /run/udev:/run/udev:ro \
         -v /dev/dri:/dev/dri:ro \
         -v "/var/home/$USER:/home/$USER:rw" \
         -v /etc/machine-id:/etc/machine-id:ro \
-        quay.io/fedora/fedora-toolbox:44 \
-        /bin/sh -c "dnf install -y flatpak distrobox mesa-dri-drivers dbus-daemon; groupadd -g $USER_GID $USER 2>/dev/null || true; useradd -u $USER_UID -g $USER_GID -d /home/$USER -M -s /bin/bash $USER 2>/dev/null || true; install -d -m 0700 -o $USER_UID -g $USER_GID /run/user/$USER_UID; exec sleep infinity"
+        "$DESKTOP_IMAGE"
 fi
 
+# A graphical container is session-scoped. Restarting it for every login also
+# refreshes the bind mount if seatd recreated its socket since the last session.
+if [ "$(podman container inspect --format '{{.State.Running}}' "$CONTAINER_NAME")" = true ]; then
+    podman stop --time 10 "$CONTAINER_NAME" >/dev/null
+fi
 podman start "$CONTAINER_NAME"
 
 cleanup() {
-    # Stopping between graphical sessions makes Podman establish a fresh bind
-    # mount to seatd's current socket inode on the next login. The container's
-    # writable layer and bind-mounted home remain persistent.
     podman stop --time 10 "$CONTAINER_NAME" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -57,8 +91,11 @@ trap cleanup EXIT
 podman exec \
     -u "$USER_UID:$USER_GID" \
     -e HOME="/home/$USER" \
+    -e USER="$USER" \
+    -e LOGNAME="$USER" \
+    -e SHELL=/bin/bash \
     -e XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
     -e XDG_SEAT=seat0 \
     -e LIBSEAT_BACKEND=seatd \
     -e SEATD_SOCK="$SEATD_SOCK" \
-    "$CONTAINER_NAME" /bin/bash "/home/$USER/.config/startup.sh"
+    "$CONTAINER_NAME" /usr/local/bin/bootsybox-session

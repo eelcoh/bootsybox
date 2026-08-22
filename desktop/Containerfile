@@ -1,0 +1,43 @@
+FROM quay.io/fedora/fedora-toolbox:44
+
+RUN dnf -y --setopt=install_weak_deps=False install \
+        niri \
+        waybar \
+        alacritty \
+        fuzzel \
+        mako \
+        swaylock \
+        swaybg \
+        xwayland-satellite \
+        xdg-desktop-portal \
+        xdg-desktop-portal-gtk \
+        xdg-desktop-portal-gnome \
+        gnome-keyring \
+        flatpak \
+        distrobox \
+        mesa-dri-drivers \
+        mesa-vulkan-drivers \
+        dbus-daemon \
+        fuse3 \
+    && dnf clean all
+
+# Fedora ships niri's maintained default as documentation. Install it as the
+# system fallback so a brand-new user gets Waybar plus terminal/launcher/logout
+# bindings without first creating a home configuration.
+RUN install -D -m 0644 \
+        /usr/share/doc/niri/default-config.kdl \
+        /etc/niri/config.kdl
+
+COPY desktop/files/usr/local/bin/bootsybox-container-init /usr/local/bin/bootsybox-container-init
+COPY desktop/files/usr/local/bin/bootsybox-session /usr/local/bin/bootsybox-session
+
+RUN chmod 0755 \
+        /usr/local/bin/bootsybox-container-init \
+        /usr/local/bin/bootsybox-session
+
+LABEL org.opencontainers.image.title="Bootsybox desktop" \
+      org.opencontainers.image.description="Reproducible rootless niri desktop for Bootsybox" \
+      org.opencontainers.image.source="https://github.com/eelcoh/bootsybox" \
+      io.bootsybox.desktop.version="1"
+
+ENTRYPOINT ["/usr/local/bin/bootsybox-container-init"]

@@ -1,0 +1,28 @@
+#!/bin/bash
+set -euo pipefail
+
+: "${BOOTSYBOX_USER:?missing BOOTSYBOX_USER}"
+: "${BOOTSYBOX_UID:?missing BOOTSYBOX_UID}"
+: "${BOOTSYBOX_GID:?missing BOOTSYBOX_GID}"
+
+if ! getent group "$BOOTSYBOX_GID" >/dev/null; then
+    groupadd --gid "$BOOTSYBOX_GID" "$BOOTSYBOX_USER"
+fi
+
+if ! getent passwd "$BOOTSYBOX_UID" >/dev/null; then
+    useradd \
+        --uid "$BOOTSYBOX_UID" \
+        --gid "$BOOTSYBOX_GID" \
+        --home-dir "/home/$BOOTSYBOX_USER" \
+        --no-create-home \
+        --shell /bin/bash \
+        "$BOOTSYBOX_USER"
+fi
+
+install -d \
+    -m 0700 \
+    -o "$BOOTSYBOX_UID" \
+    -g "$BOOTSYBOX_GID" \
+    "/run/user/$BOOTSYBOX_UID"
+
+exec sleep infinity
