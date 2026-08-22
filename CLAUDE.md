@@ -1,116 +1,168 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Project
 
-## Repository state
+Bootsybox is an experimental Fedora bootc desktop host. The immutable host owns
+boot, authentication and hardware arbitration; every regular user's compositor,
+applications and mutable package state live in that user's rootless Podman
+container.
 
-This repository ("bootsybox") contains a design conversation (`conversation-with-ai`, a saved chat transcript, partly in Dutch) that lays out the full target architecture for an immutable, multi-tenant Linux desktop distribution, plus a first, partial implementation of it — see "Current implementation" below for exactly what exists and what's still just design. Treat the transcript as the design record for anything not yet built; treat the sections below as authoritative for anything that is.
+The original design conversation is saved as `conversation-with-ai`. It contains
+useful product intent but many of its command examples were speculative. This
+file and the implementation are authoritative.
 
-Related repositories referenced as prior art / inspiration (not vendored here):
-- https://github.com/eelcoh/bootsy-linux
-- https://github.com/eelcoh/kubevirt-host-bootc-image
-- https://github.com/eelcoh/zirconium-base
+## Goals and current interpretation
 
-## What bootsybox is
+- **Immutable host:** build and update the host as an OCI/bootc image.
+- **Per-user environment:** keep mutable desktop software out of the host image.
+- **Least privilege:** the host owns VTs, DRM and input through seatd. A desktop
+  container connects to seatd's Unix socket and must not receive host VTs or raw
+  input devices.
+- **Reproducibility:** eventually replace first-login package installation with
+  versioned desktop images or a user-owned declarative image recipe. A
+  `distrobox.ini` only describes nested development containers and is not enough
+  to reproduce the outer desktop container.
 
-A bootc-based (bootable container) immutable Linux host that gives every regular user a fully isolated, GUI-capable desktop running inside a rootless Podman container, rather than a login session on the host itself. The goal is a distribution that is:
-- **Immutable at the base**: the host root filesystem is built from a `Containerfile` and shipped as an OCI image; only `/var` and `/etc` are writable. Updates are atomic (`bootc switch` / `bootc update`), with automatic rollback on failure.
-- **Isolated per user**: each user's entire desktop environment — window manager, apps, dotfiles, Flatpaks, nested containers — lives inside their own container, never on the host.
-- **Reproducible**: a user's environment is declared in a `distrobox.ini` manifest and can be recreated identically (`distrobox assemble create`) on any other host running this distribution, by carrying just their home directory / dotfiles.
+"Isolated" currently means separate Unix users, rootless user namespaces,
+container filesystems and normal PID/IPC/network namespaces. It does not claim
+VM-grade protection against hostile users. SELinux label separation is disabled
+for the desktop container while it bind-mounts an existing home and the shared
+seatd socket; this is a known hardening gap.
 
-## Core architecture
+## Architecture
 
-Two layers, cleanly separated:
+### Host
 
-1. **Host layer (bootc)** — kernel, drivers, `greetd` (login manager), `podman`, and nothing user-facing. The host never runs a window manager or user applications itself in the latest iteration of the design (see "Design evolution" below); it only brokers hardware access. Base image is **Fedora bootc** (`quay.io/fedora/fedora-bootc:44`), not CentOS Stream bootc as most of the transcript assumes — `greetd` has no package in CentOS Stream 9's repos, only in Fedora's.
-2. **User layer (rootless Podman container)** — one long-lived container per user (`podman create --name desktop-env-$USER ...`), started at login and torn into by `podman exec`. This is where the window manager, Flatpaks, Distrobox (nested containers), dotfiles, and all user state live. Base image is `quay.io/fedora/fedora-toolbox:44` — the transcript's `quay.io/toolbx-images/fedora-toolbox` repo isn't anonymously accessible (`unauthorized` on pull); `quay.io/fedora/fedora-toolbox` is the correct, working repo.
+- `quay.io/fedora/fedora-bootc:44`
+- greetd/agreety authenticates on VT1.
+- A root-owned seatd service creates `/run/seatd.sock`, owned by group
+  `bootsybox-seat`.
+- `launch-user-container.sh` runs as the authenticated user and creates or starts
+  that user's rootless container.
+- The host does not run the user's compositor or applications.
 
-Key mechanisms tying the layers together:
+The Fedora greetd package already ships `/etc/pam.d/greetd` with a session stack
+that includes `pam_systemd` through `system-auth`. Do not replace it without a
+specific, VM-observed failure. The previous VM appeared to lack a logind session
+for the authenticated user; re-check that observation on the rebuilt image.
 
-- **Home persistence**: `/var/home/$USER` on the host is bind-mounted to `/home/$USER` in the container (`-v /var/home/$USER:/home/$USER:rw`), so everything the user creates survives container rebuilds and host reboots.
-- **Login flow**: `greetd` (optionally themed via `regreet`) on the host authenticates the user, then execs a host script (`/usr/local/bin/launch-user-container.sh`) that creates/starts the user's container and hands off control to it. `[default_session].user` in `files/etc/greetd/config.toml` is `"greetd"`, not the transcript's/upstream greetd docs' `"greeter"` — Fedora's `greetd` RPM only creates a `greetd` sysuser (`/usr/lib/sysusers.d/greetd.conf`), no separate `greeter` account exists. Using a nonexistent user here doesn't error loudly: `greetd.service` (`Restart=always`, `RestartSec=1`, `StartLimitBurst=5`) just crash-loops silently and gets rate-limited within seconds, leaving a blank console with no login prompt — check `journalctl -u greetd` / audit logs for `unit=greetd ... res=failed` if this regresses. `launch-user-container.sh` derives the username via `USER=$(id -un)` rather than trusting an ambient `$USER` env var — greetd execs the session command directly with no login shell involved, so nothing sources profile scripts to set `$USER`, and the script's `set -u` turns a missing one into an immediate `unbound variable` exit on the very first line that uses it, before anything else runs.
-- **Display**: Wayland only (never X11), because Wayland isolates input/output per client — X11 would let one user's container keylog or screen-scrape another user's session. The Wayland socket (`/run/user/$UID/wayland-0`) and `XDG_RUNTIME_DIR` are shared into the container.
-- **GPU**: `--device /dev/dri` (and `/dev/kfd` for compute) is passed into the container so rendering is hardware-accelerated instead of falling back to software rendering.
-- **Network/Bluetooth from inside the container** *(not yet implemented — design only)*: containers don't get raw access to the wifi/bluetooth hardware. The host's D-Bus system bus socket is already bind-mounted read-only (`/run/dbus/system_bus_socket`) by `launch-user-container.sh`, but no D-Bus policy file (`/etc/dbus-1/system.d/...`) granting the `users` group permission to talk to `org.bluez` / NetworkManager interfaces has been added yet — until that lands, Bluetooth pairing from inside the container won't work.
-- **Nested containers**: because the host runs Podman rootless with user namespaces (subuid/subgid), users can run `distrobox create` *inside* their own container to spin up further sibling containers (e.g. a separate Ubuntu or Arch toolbox), with no root daemon involved anywhere in the chain. This requires `--device /dev/fuse` and `--security-opt unmask=ALL` on the outer container.
-- **Session lingering is required, and isn't automated yet**: rootless Podman with `--cgroup-manager=systemd` parents containers under the target user's own `systemd --user` instance (`user@$UID.service`), not the system manager — `/etc/systemd/system/bootsybox-containers.slice` is a *system* unit and is actually inert for this flow; podman just auto-creates a same-named transient slice under the user's tree instead. `user@$UID.service` stops as soon as that user's last login session closes, which kills every container nested under it — defeating the entire point of `desktop-env-$USER` outliving any single login — unless `loginctl enable-linger $USER` has been run for that account. That can only be done as root (`org.freedesktop.login1.set-user-linger`'s default polkit policy is `auth_admin_keep`, so a user can't self-service it, and `launch-user-container.sh` runs unprivileged), so it belongs in the not-yet-implemented Kickstart `%post` (or equivalent user-provisioning step), not in the launch script. Until that lands, any test user must have `sudo loginctl enable-linger <user>` run for them manually once per boot before their container will survive session teardown.
-- **Resource containment**: all user containers are placed in a systemd slice (`/etc/systemd/system/bootsybox-containers.slice`, invoked via `podman create --cgroup-manager=systemd --cgroup-parent=...`) with `CPUQuota` / `MemoryMax` limits, so one user's runaway process can't starve the host or other users. Named `bootsybox-containers.slice` rather than the transcript's `user-container-limit.slice` — that name collides with systemd's dash-based slice hierarchy (it's parsed as a child of `user.slice`) and produces a real ordering cycle; the transcript's `CPUSchedulingPolicy=` key was also dropped, as it isn't valid in a `[Slice]` section. The transcript's `podman create --slice=...` flag doesn't exist either — `podman create --help` has no `--slice`, only `--cgroup-parent`, which is what actually assigns a container to a systemd slice under `--cgroup-manager=systemd`. Verify any changes to the unit itself with `systemd-analyze verify`.
-- **Update model** *(not yet implemented — design only)*: the transcript's launch script tracks an installed container version in `/var/home/$USER/.config/container_version` and rebuilds the container (never touching `/var/home`) when the host's `CURRENT_VERSION` changes. The current `launch-user-container.sh` has no version tracking — it only creates the container if it doesn't already exist.
-- **Declarative per-user environments** *(not yet implemented — design only)*: a central `/etc/distrobox/central.ini` manifest, shipped in the bootc image, would be copied into a new user's home on first login and built via `distrobox assemble create`. Not wired up yet.
+### Desktop container
 
-### Theming (Material You) *(not yet implemented — design only)*
+- `quay.io/fedora/fedora-toolbox:44`
+- `--userns=keep-id` maps the desktop user to their host UID.
+- `--group-add keep-groups` preserves membership of `bootsybox-seat`, allowing a
+  connection to the seatd socket.
+- `/var/home/$USER` is mounted at `/home/$USER`.
+- `/run/seatd.sock`, read-only udev metadata and a read-only view of `/dev/dri`
+  are bind-mounted into the container. The DRM paths are needed for compositor
+  discovery; seatd still performs the privileged opens and passes the resulting
+  file descriptors. The container does not mount `/dev/tty*`, `/dev/input`, the
+  host runtime directory or system D-Bus.
+- `/dev/fuse` is passed explicitly for Flatpak's document portal and future
+  nested-container storage; no other raw device is passed with `--device`.
+- `startup.sh` forces libseat's seatd backend and launches niri or sway through a
+  fresh D-Bus session.
 
-- Config templates live under `/etc/skel/.config/{gtk-4.0,waybar,niri}` in the host image so every new user starts themed.
-- `matugen` (run from inside the user's container) derives a Material Design 3 palette from the user's wallpaper and rewrites templated config files (`*.base.css` / `*.base.kdl` → `style.css` / `config.kdl`) for Waybar and Niri, then triggers a live reload (`niri msg action reload-config`).
-- GTK4/libadwaita apps are forced into the theme via `~/.config/gtk-4.0/settings.ini` since libadwaita ignores traditional GTK theme switching.
+The outer container is persistent but runs only for the graphical login. It is
+stopped when the compositor exits, which also makes the next start bind seatd's
+current socket inode if the broker was restarted. It bootstraps Flatpak,
+Distrobox, Mesa and D-Bus with `dnf` when first created. This is acceptable for
+the current prototype but is not the final update/reproducibility model.
 
-### Design evolution: where the window manager runs
+## Current milestone
 
-The design in the conversation evolves over its course — later sections supersede earlier ones on this point:
-- **Earlier iterations** installed a specific WM (Niri) directly into the shared container image and had the host launch script exec it by name.
-- **Final iteration** moves WM choice entirely into the user's container: the host launch script only creates the container and execs a generic `/home/$USER/.config/startup.sh` *inside* it; that script (seeded from `/etc/skel`) detects and launches whichever WM the user has installed (Niri, Sway, Hyprland, ...), selected via their own `distrobox.ini`. This requires `--privileged` and `-v /dev:/dev:rw`, since a compositor launched from a bare TTY needs direct `libinput`/DRM access. Treat this as the intended target architecture unless told otherwise — the host should stay maximally generic and WM-agnostic. The transcript also passed a handful of individual `--device` flags (`/dev/dri`, `/dev/kfd`, `/dev/fuse`, the controlling TTY) alongside `--privileged -v /dev:/dev:rw` — those are both redundant (the privileged full-`/dev` mount already grants everything they'd add) and actively harmful (`podman create --device` stats the path up front, so `--device /dev/kfd` hard-fails container creation on any host without an AMD GPU, e.g. any plain VM). Dropped in favor of just `--privileged -v /dev:/dev:rw`.
+The original login-to-container path has been VM-tested. The former attempt to
+let a rootless container claim `/dev/tty2` reached `TIOCSCTTY`/VT permission
+failures and accumulated unsafe workarounds (`--privileged`, host namespaces,
+static VT permissions and a file-capable `chvt`). That design has been removed.
 
-### Provisioning / deployment *(not yet implemented — design only)*
+The current milestone is implemented but still needs VM verification:
 
-- **CI**: a GitHub Actions workflow (`.github/workflows/build-os.yml`, not yet created) is intended to build the host `Containerfile` with Podman and push it to GHCR on every push to `main`.
-- **Installation**: a Kickstart file (`ks.cfg`) drives Anaconda to partition a disk and pull the built image directly via `ostreecontainer --url ghcr.io/...`, rather than a traditional package-based install. Root filesystem is **btrfs**, not the transcript's `xfs` (its `ks.cfg` snippet used `part / --fstype=xfs --grow`) — when `ks.cfg` is actually written, use `part / --fstype=btrfs --grow` instead. This also applies anywhere else a root filesystem type is chosen for this image (e.g. `bootc-image-builder --rootfs`, see below).
+1. host seatd starts before greetd;
+2. testuser authenticates through agreety;
+3. the rootless desktop container connects to host seatd;
+4. niri, installed in the user's container, acquires the seat and holds the
+   graphical display;
+5. logging out returns to greetd without leaving the seat wedged.
 
-## Current implementation
+Theming, NetworkManager/Bluetooth APIs, nested-container verification, automatic
+container rebuilds, installer media and CI are deliberately out of scope until
+this milestone passes.
 
-The foundational milestone is built and **VM-verified end-to-end**: a host `Containerfile` and the login → per-user-container → in-container-WM hand-off. Confirmed by actually booting a `bootc-image-builder`-produced qcow2 in QEMU: `greetd`/`agreety` authenticates a test user at the console, `launch-user-container.sh` creates and starts `desktop-env-<user>`, execs into it, and `startup.sh` correctly reports "No Window Manager found" (since none is installed) before control returns to the greeter. The container survives that whole cycle once `loginctl enable-linger` is set for the test user (see the session-lingering bullet above). Every fix in this section was found this way, not by static review — VM boots surfaced things `podman build`/`shellcheck`/`systemd-analyze` alone could not have. `scripts/` (`config.toml`, `createvm.sh`, `startvm.sh`) holds the VM testing scaffolding: a `bootc-image-builder` invocation baking a `testuser`/`testpass` account (in `wheel` and `bootsybox-seat`) with an SSH key, and a `qemu-system-x86_64` launcher with `hostfwd=tcp::2222-:22` for SSH access (`ssh -p 2222 testuser@localhost`) alongside the graphical console window.
+## Repository layout
 
-### Phase 2 (niri launch): substantial progress, one open architectural blocker
-
-Scope for this phase (confirmed with the user): get niri to actually launch and hold the display, nothing broader. A long VM-based debugging session fixed a whole chain of real, distinct bugs, in order:
-
-1. **`startup.sh` pre-exported `WAYLAND_DISPLAY`** before launching niri — winit (niri's windowing backend) treats a set `WAYLAND_DISPLAY` as "run nested inside an existing compositor" and tries to connect to it as a client, failing with `NoCompositor` since nothing's listening. Fixed by not pre-exporting it; niri creates and exports its own.
-2. **`seatd`'s RPM install fails**: its `%sysusers` scriptlet exits 127 in this non-systemd container (same class of issue as niri's own `%triggerin` failures, but `--setopt=tsflags=noscripts` does *not* cover `%sysusers`-class scriptlets — only `%pre`/`%post`/`%preun`/`%postun`/`%verifyscript`). Fixed by bypassing RPM's scriptlet execution entirely: `dnf download --destdir=/tmp seatd && rpm2cpio /tmp/seatd-*.rpm | cpio -idmv -D /` extracts the files directly. This (plus `dbus-daemon`, which installs cleanly) is now baked into the container's first-boot entrypoint in `launch-user-container.sh`, so a fresh container gets both automatically — niri itself stays a manual per-user `dnf install`, matching the "WM choice is the user's, not baked into shared setup" design principle.
-3. **`podman exec -it` gives the WM a fresh pty, not the real VT** greetd ran on — seatd can't correlate the client to a VT via its controlling terminal without one, so niri starts but stays "paused" (`session is not active, starting libinput in paused state`).
-4. **Rootless podman UID-namespace remapping**: container-"root" is never real host root, so no `--privileged`/capability configuration grants DAC access to real-root-owned 0600 VT/console device nodes. Tried `--userns=keep-id` (1:1 UID mapping) + a matching-UID user account created in the container + running the WM as that real UID via `podman exec -u`, banking on the *same* per-session device ACL mechanism a normal non-containerized desktop login gets from `logind`. That mechanism turned out not to apply here: `loginctl list-sessions` shows greetd never registers a logind session for the authenticated user at all — only for the greeter itself (`pam_open_session` is only ever called for the `greetd-greeter` PAM service, never for `greetd`, confirmed via `journalctl -u greetd` showing `pam_unix(greetd:auth)` but never `pam_unix(greetd:session)`). No ACL is ever granted to chase.
-5. **Switched to static group-based device access** instead: a dedicated `bootsybox-seat` system group (`Containerfile`), a udev rule (`files/etc/udev/rules.d/99-bootsybox-seat.rules`) granting it `rw` on `tty[0-9]*`/`console`, `testuser` added to it via `scripts/config.toml`, and `--group-add keep-groups` on `podman create` so the container inherits it. This actually got device *file* access working (confirmed: mode changed to `crw-rw----`, `cat`/`ls` succeed as the real UID).
-6. **`--userns=keep-id` silently changes podman's default identity for the container's own entrypoint** too — without an explicit `--user`, the *main* container process (not just later `exec`s) runs as the keep-id-mapped real user instead of container-root, so `dnf install`/`useradd`/`ldconfig` in the entrypoint were failing with `Permission denied` until `--user root` was added explicitly to `podman create` (independent of the real-UID `podman exec -u` used later for the WM itself).
-7. **Blanket `-v /dev:/dev:rw` breaks `podman exec -it`'s pty setup** under `--userns=keep-id`: it replaces the container's private `/dev/pts` with the host's shared one, and `crun`'s pty chown then fails (`crun: chown /dev/pts/N: Operation not permitted`) since a rootless process can't hand a pty to a foreign mapped UID. Confirmed via an ad-hoc `podman run` A/B test (reproduced with the mount, not without). Fixed by dropping the blanket mount — `--privileged` alone already auto-provides `/dev/dri` and `/dev/input`, confirmed live — and bind-mounting only the specific nodes actually needed: `/dev/tty0`, `/dev/tty2`, `/dev/console` (deliberately *not* `tty1`, greetd's own VT).
-8. **VT_ACTIVATE (switching which VT is displayed) requires `CAP_SYS_TTY_CONFIG`, checked against the VT subsystem globally — not namespace-aware.** No capability configuration inside a rootless container, however `--privileged`, can ever satisfy it; only a genuinely host-level process can. `startup.sh` had been using `openvt -c 2 -s -w` to both claim and switch to VT2 from inside the container; the switch-back-on-exit call failed with `openvt: Couldn't activate vt 1: Operation not permitted`, confirming this. Fixed (partially — see below) by moving the switch to the host: `chvt` granted the `cap_sys_tty_config` file capability in the `Containerfile` (`setcap cap_sys_tty_config+ep /usr/bin/chvt`), called from `launch-user-container.sh` (a real host process, unprivileged but capable via the file capability) right before the `podman exec` handoff.
-
-**Open blocker, unresolved at session end**: with `openvt` removed from `startup.sh` in favor of a plain `setsid --ctty` on the now-unclaimed `/dev/tty2` (no forced steal needed, unlike tty1), that call *itself* now fails: `setsid: failed to set the controlling terminal: Operation not permitted`. This suggests `TIOCSCTTY` on a VT-backed tty hits the *same* non-namespaced-capability wall as `VT_ACTIVATE` — plausibly the VT driver's own ioctl handling extends the generic tty layer's `TIOCSCTTY` with the same global capability check, rather than the ordinary session-leader-claims-an-unclaimed-tty POSIX semantics that would otherwise apply. If that read is correct, **it means a rootless container may never be able to claim a VT-backed tty as a controlling terminal at all, independent of UID mapping, group membership, or which capabilities the container itself holds** — a potentially fundamental incompatibility between "rootless container directly owns a VT" (this project's core mechanism for the WM launch) and how the kernel's VT subsystem gates itself, not a fixable permissions bug. This needs a real architecture discussion before further patching — candidates include a privileged host-side helper performing VT/session setup *before* handing off in a way that survives `podman exec`'s pty allocation (unconfirmed whether that's even possible), or reconsidering whether the compositor should claim a VT from inside the container at all. Not resolved this session.
-
-```
-Containerfile                                   # FROM quay.io/fedora/fedora-bootc:44
+```text
+Containerfile
 files/
-  usr/local/bin/launch-user-container.sh         # host script greetd execs on login
-  etc/greetd/config.toml                         # plain agreety session, no theming yet
-  etc/systemd/system/bootsybox-containers.slice   # CPU/memory limits for user containers
-  etc/skel/.config/startup.sh                    # in-container: detects/execs niri or sway
-  etc/udev/rules.d/99-bootsybox-seat.rules        # static VT/console device access grant
+  etc/greetd/config.toml
+  etc/skel/.config/startup.sh
+  etc/systemd/system/bootsybox-containers.slice
+  etc/systemd/system/greetd.service.d/10-seatd.conf
+  etc/systemd/system/seatd.service.d/10-bootsybox.conf
+  usr/local/bin/launch-user-container.sh
 scripts/
-  config.toml                                     # bootc-image-builder testuser provisioning
-  createvm.sh                                      # builds the test qcow2
-  startvm.sh                                        # boots it under qemu with SSH port-forward
+  config.toml
+  createvm.sh
+  refresh.sh
+  startvm.sh
 ```
 
-`files/` mirrors absolute host paths one-to-one and is `COPY`'d into the image path-by-path from the `Containerfile` — when adding a new host-destined file, add it under `files/<same absolute path>` and add a matching `COPY` line, don't invent a different layout.
+`files/` mirrors destination paths in the host image. Add a matching `COPY` to
+the `Containerfile` for every new host file.
 
-### Build & verify
+## Build and verify
 
-- `podman build -f Containerfile -t bootsybox-host:dev .` — builds the host image. This is the primary check that the `Containerfile` and every file it `COPY`s are consistent; it also runs on a real Fedora bootc base so `dnf install` failures for packages referenced anywhere in this design (e.g. `greetd`, which does **not** exist in CentOS Stream repos — see above) surface immediately. Use `set -o pipefail` if piping the output through `tee`, or you'll silently lose a non-zero exit code.
-- `shellcheck files/usr/local/bin/launch-user-container.sh files/etc/skel/.config/startup.sh` — lint both shell scripts. If `shellcheck` isn't installed locally, run it via `podman run --rm --security-opt label=disable -v "$(pwd)/files:/mnt/files:ro" docker.io/koalaman/shellcheck:stable /mnt/files/...` (the `--security-opt label=disable` is required on SELinux hosts, or the mount is unreadable inside the container).
-- `systemd-analyze verify "$(pwd)/files/etc/systemd/system/bootsybox-containers.slice"` — catches invalid unit keys and ordering-cycle bugs like the one this file already had once (see above).
-- `python3 -c "import tomllib; tomllib.load(open('files/etc/greetd/config.toml','rb'))"` — sanity-checks the greetd TOML.
-
-There is no bootc host available to boot in this dev/CI environment itself, so none of the above alone proves the login flow works end-to-end — that requires an actual VM, and it has been done (see "Current implementation" above for the result). To repeat it: build a bootable disk image with `bootc-image-builder`, boot it under libvirt/qemu with a console, create a test user (with `loginctl enable-linger <user>` run once as root — required, see the session-lingering bullet above, or the container will die as soon as that user's login session ends), and confirm at the `greetd`/`agreety` prompt that logging in creates and enters a `desktop-env-<user>` container running `startup.sh` (which will correctly report "No Window Manager found" until a WM is `dnf install`ed inside that container).
-
-`bootc-image-builder` needs both the host image built under the **same podman storage it mounts** (build with `sudo podman build ...` if you're mounting `/var/lib/containers/storage`, since a plain rootless `podman build` lands in `~/.local/share/containers/storage` instead and won't be found) and an explicit `--rootfs btrfs` flag — this container image doesn't carry default-root-filesystem metadata, so omitting the flag fails with `missing required info: DefaultRootFs`. Example:
+Static checks:
 
 ```bash
-sudo podman run --rm -it --privileged --pull=newer --security-opt label=type:unconfined_t \
-  -v "$(pwd)/config.toml:/config.toml:ro" -v "$(pwd)/output:/output" \
-  -v /var/lib/containers/storage:/var/lib/containers/storage \
-  quay.io/centos-bootc/bootc-image-builder:latest \
-  --type qcow2 --rootfs btrfs localhost/bootsybox-host:dev
+bash -n files/usr/local/bin/launch-user-container.sh \
+  files/etc/skel/.config/startup.sh
+shellcheck files/usr/local/bin/launch-user-container.sh \
+  files/etc/skel/.config/startup.sh
+systemd-analyze verify \
+  /usr/lib/systemd/system/seatd.service \
+  files/etc/systemd/system/bootsybox-containers.slice
+python3 -c "import tomllib; tomllib.load(open('files/etc/greetd/config.toml','rb'))"
 ```
 
-## Working in this repo
+Build the host image:
 
-- When implementing pieces of this design, keep the host/container boundary strict: nothing user-installable or user-configurable belongs in the host `Containerfile` — it belongs in the container image, `/etc/skel`, or the user's own `distrobox.ini`.
-- Scripts destined for the host (`launch-user-container.sh`, D-Bus policy, systemd slice, `Containerfile`) are trusted/admin-controlled; scripts destined for inside the user container (`startup.sh`, matugen templates) should be treated as user-editable and not assumed to be pristine.
-- The source conversation (`conversation-with-ai`) is the design record, not documentation to keep in sync — once real Containerfiles/scripts exist, prefer reading and updating those directly rather than re-deriving requirements from the transcript.
+```bash
+sudo podman build -f Containerfile -t bootsybox-host:dev .
+```
+
+Build a btrfs qcow2 using the same rootful Podman storage:
+
+```bash
+cd scripts
+./createvm.sh
+./startvm.sh
+```
+
+The image-builder test account is `testuser` / `testpass` and belongs to
+`wheel` and `bootsybox-seat`. SSH is forwarded to port 2222.
+
+On the first console login the container is created and reports that no WM is
+installed. From SSH, install niri in that already-created container:
+
+```bash
+ssh -p 2222 testuser@localhost
+podman exec -u root desktop-env-testuser dnf install -y niri
+```
+
+Then log in again at the graphical console. Collect failures with:
+
+```bash
+journalctl -b -u seatd -u greetd
+loginctl list-sessions
+podman logs desktop-env-testuser
+cat ~/.config/startup.log
+```
+
+The VM launcher uses `virtio-vga-gl` and GTK OpenGL. Plain `-vga virtio` only
+provides software EGL in this VM; niri skips software renderers and fails with
+`no allocator available for device`, even though seatd itself is working.
+
+Do not add back direct VT mounts, broad `/dev` mounts, `--privileged`, host PID
+or IPC namespaces, or `chvt` capabilities to fix a seatd failure. Diagnose the
+host broker/socket boundary instead.
