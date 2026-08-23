@@ -18,12 +18,13 @@ are authoritative.
 - greetd/agreety authenticates on VT1.
 - seatd owns the physical seat and exposes `/run/seatd.sock` to members of
   `bootsybox-seat`.
-- `launch-user-container.sh` pulls the declared desktop image, replaces an
-  outdated outer container while preserving the bind-mounted home, and runs the
-  graphical session as the authenticated UID.
+- `launch-user-container.sh` pulls the declared desktop image, validates its API,
+  stages a candidate, and replaces an outdated outer container while preserving
+  the bind-mounted home. Failed images fall back to the cached last-known-good
+  image.
 - The container receives the seatd socket, read-only udev/DRM discovery data,
-  `/dev/fuse`, the user's home and machine ID. It does not receive raw input,
-  host VTs, the host runtime directory or the host system bus.
+  the user's home and machine ID. It does not receive host VTs, the host runtime
+  directory or the host system bus.
 
 ### Desktop image
 
@@ -34,13 +35,14 @@ are authoritative.
 - `bootsybox-session` starts a private D-Bus session, launches niri through host
   seatd, exports the Wayland environment to D-Bus activation, and starts
   notifications, secrets and portals.
-- The outer container is persistent but session-scoped. Logout stops it and
-  returns control to greetd; the next login starts it again.
+- The outer container is disposable and session-scoped. Logout stops it and
+  returns control to greetd; image changes replace it on the next login.
 
 `--userns=keep-id` and `--group-add keep-groups` preserve the user identity and
-seat group. SELinux label separation is currently disabled because the desktop
-shares an existing home and host socket. This is a documented hardening gap,
-not VM-grade isolation.
+seat group. The outer environment runs rootless-privileged so nested Flatpak
+Bubblewrap can mount its sandbox. It cannot exceed the authenticated user's host
+privileges, but Podman isolation is deliberately not a security boundary. See
+`docs/PERSISTENCE.md` for the persistence, update and trust contracts.
 
 ## Repository layout
 
@@ -50,6 +52,7 @@ desktop/Containerfile                 reproducible desktop image
 desktop/files/usr/local/bin/          container init and session launchers
 files/                                files copied into the host image
 docs/ROADMAP.md                       staged project plan
+docs/PERSISTENCE.md                   state, upgrade and trust contract
 .github/workflows/build-desktop.yml   GHCR publisher
 scripts/                              image-builder and QEMU helpers
 ```

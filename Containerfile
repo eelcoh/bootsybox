@@ -1,5 +1,7 @@
 FROM quay.io/fedora/fedora-bootc:44
 
+LABEL io.bootsybox.host.desktop-api="1"
+
 RUN dnf -y install \
         greetd \
         podman \

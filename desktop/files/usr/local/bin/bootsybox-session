@@ -12,6 +12,7 @@ export XDG_SESSION_DESKTOP=niri
 export XDG_CURRENT_DESKTOP=niri
 export LIBSEAT_BACKEND=seatd
 export SEATD_SOCK=/run/seatd.sock
+export XDG_DATA_DIRS="$HOME/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share"
 
 if [ ! -S "$SEATD_SOCK" ]; then
     echo "Host seatd socket is unavailable: $SEATD_SOCK" >&2
@@ -52,6 +53,7 @@ exec dbus-run-session -- bash -c '
                     gnome-keyring-daemon --start --components=secrets
                     mako &
                     /usr/libexec/xdg-desktop-portal &
+                    touch "$XDG_RUNTIME_DIR/bootsybox-session-ready"
                     exit 0
                 fi
             done

@@ -38,6 +38,7 @@ RUN chmod 0755 \
 LABEL org.opencontainers.image.title="Bootsybox desktop" \
       org.opencontainers.image.description="Reproducible rootless niri desktop for Bootsybox" \
       org.opencontainers.image.source="https://github.com/eelcoh/bootsybox" \
+      io.bootsybox.desktop.api="1" \
       io.bootsybox.desktop.version="1"
 
 ENTRYPOINT ["/usr/local/bin/bootsybox-container-init"]

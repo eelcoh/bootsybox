@@ -10,8 +10,8 @@
 
 ## Phase 1: reproducible desktop image
 
-Implementation status: complete in the repository. Acceptance is pending the
-first GHCR publication and a fresh-VM login test.
+Implementation and VM acceptance status: complete. A fresh user can pull the
+published image and reach niri without manual package installation.
 
 - Build a dedicated Fedora desktop OCI image containing niri and the supported
   session components.
@@ -26,9 +26,10 @@ installation.
 
 ## Phase 2: complete graphical session
 
-Implementation status: complete in the repository. Local image/config checks
-pass; portal, Flatpak and logout behavior still require the fresh-VM acceptance
-run after publication.
+Implementation status: all VM acceptance checks passed except nested Flatpak.
+The outer container is now explicitly a disposable rootless-privileged
+environment so Bubblewrap can provide the application sandbox. Flatpak launch
+and application discovery require one final VM retest.
 
 - Provide a terminal, launcher, Waybar and notifications.
 - Start a private D-Bus session and export the compositor-created display to
@@ -42,9 +43,16 @@ repeat login work without fatal journal errors.
 
 ## Phase 3: persistence contract
 
-- Specify which home data, Flatpaks, configuration, keyrings and volumes survive
-  outer-container replacement.
-- Test recreation and migration between desktop image versions.
+Implementation status: contract and upgrade mechanics are implemented; destructive
+replacement, migration and rollback still require VM acceptance testing.
+
+- Treat the outer container filesystem as disposable and never install packages
+  into it interactively.
+- Persist home data, user Flatpaks, configuration and keyrings through the home
+  bind mount; use explicit volumes for any future non-home state.
+- Stage and validate replacement containers before removing the current one.
+- Track last-known-good and failed image IDs for automatic fallback.
+- Test recreation, migration and rollback between desktop image versions.
 
 ## Phase 4: nested containers
 
@@ -54,8 +62,11 @@ repeat login work without fatal journal errors.
 
 ## Phase 5: hardening
 
-- Replace `label=disable` with a targeted SELinux policy.
-- Minimize DRM and seatd exposure.
+- Document that the rootless-privileged outer environment is not a security
+  boundary and cannot exceed the authenticated user's host privileges.
+- Keep meaningful application isolation in Flatpak/Bubblewrap and development
+  isolation in nested containers.
+- Minimize explicit host sockets and persistent mounts.
 - Apply effective per-user CPU, memory, process and file-descriptor limits.
 - Audit mounts and capabilities and document the isolation boundary.
 

@@ -18,6 +18,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Generate release tags
+        id: release
+        run: |
+          echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -29,4 +35,7 @@ jobs:
           context: .
           file: desktop/Containerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/bootsybox-desktop:44
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/bootsybox-desktop:44
+            ghcr.io/${{ github.repository_owner }}/bootsybox-desktop:44-${{ steps.release.outputs.date }}-${{ steps.release.outputs.short_sha }}
+            ghcr.io/${{ github.repository_owner }}/bootsybox-desktop:sha-${{ github.sha }}
