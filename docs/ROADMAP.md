@@ -146,10 +146,9 @@ installation.
 
 ## Phase 2: complete graphical session
 
-Implementation status: all VM acceptance checks passed except nested Flatpak.
-The outer container is now explicitly a disposable rootless-privileged
-environment so Bubblewrap can provide the application sandbox. Flatpak launch
-and application discovery require one final VM retest.
+Implementation and VM acceptance status: complete. The outer container is an
+explicitly disposable rootless-privileged environment, Bubblewrap can construct
+the Flatpak sandbox, and installed Flatpaks appear in Fuzzel.
 
 - Provide a terminal, launcher, Waybar and notifications.
 - Start a private D-Bus session and export the compositor-created display to
@@ -163,10 +162,9 @@ repeat login work without fatal journal errors.
 
 ## Phase 3: persistence contract
 
-Implementation status: the persistence contract and a login-time replacement/
-fallback prototype are implemented. The deliberate transactional desktop update
-interface is Phase 4 work; destructive replacement, migration and rollback
-still require VM acceptance testing.
+Implementation status: the persistence contract, staged replacement, immediate
+readiness promotion and fallback/rollback state are implemented. Destructive
+replacement, migration and rollback still require VM acceptance testing.
 
 - Treat the outer container filesystem as disposable and never install packages
   into it interactively.
@@ -185,7 +183,8 @@ origin.
 Implementation status: the host publication workflow, remote-origin VM build,
 narrow update broker/client, explicit desktop staging, session-boundary
 activation and last-known-good rollback are implemented in the repository.
-Publication and the full VM update/rollback matrix remain to be accepted.
+Host and desktop update checks pass in the VM. This release creates new targets
+for staging, apply and rollback acceptance.
 
 - Add CI for the customized Bootsybox host image.
 - Publish Fedora-channel, dated commit-specific and full-SHA tags.

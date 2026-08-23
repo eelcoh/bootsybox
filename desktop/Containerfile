@@ -43,6 +43,6 @@ LABEL org.opencontainers.image.title="Bootsybox desktop" \
       org.opencontainers.image.source="https://github.com/eelcoh/bootsybox" \
       io.bootsybox.desktop.api="1" \
       io.bootsybox.desktop.host-api="1" \
-      io.bootsybox.desktop.version="1"
+      io.bootsybox.desktop.version="2"
 
 ENTRYPOINT ["/usr/local/bin/bootsybox-container-init"]

@@ -165,20 +165,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-SESSION_STATUS=0
-podman exec \
-    -u "$USER_UID:$USER_GID" \
-    -e HOME="/home/$USER" \
-    -e USER="$USER" \
-    -e LOGNAME="$USER" \
-    -e SHELL=/bin/bash \
-    -e XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-    -e XDG_SEAT=seat0 \
-    -e LIBSEAT_BACKEND=seatd \
-    -e SEATD_SOCK="$SEATD_SOCK" \
-    "$CONTAINER_NAME" /usr/local/bin/bootsybox-session || SESSION_STATUS=$?
-
-if podman exec "$CONTAINER_NAME" test -f "$XDG_RUNTIME_DIR/bootsybox-session-ready"; then
+promote_ready_image() {
     if [ -r "$LAST_GOOD_FILE" ] &&
        [ "$(cat "$LAST_GOOD_FILE")" != "$SELECTED_IMAGE_ID" ]; then
         cp "$LAST_GOOD_FILE" "$ROLLBACK_IMAGE_FILE"
@@ -192,7 +179,46 @@ if podman exec "$CONTAINER_NAME" test -f "$XDG_RUNTIME_DIR/bootsybox-session-rea
        [ "$(cat "$FAILED_IMAGE_FILE")" = "$SELECTED_IMAGE_ID" ]; then
         rm -f "$FAILED_IMAGE_FILE"
     fi
-else
+}
+
+podman exec \
+    -u "$USER_UID:$USER_GID" \
+    -e HOME="/home/$USER" \
+    -e USER="$USER" \
+    -e LOGNAME="$USER" \
+    -e SHELL=/bin/bash \
+    -e XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
+    -e XDG_SEAT=seat0 \
+    -e LIBSEAT_BACKEND=seatd \
+    -e SEATD_SOCK="$SEATD_SOCK" \
+    "$CONTAINER_NAME" /usr/local/bin/bootsybox-session &
+SESSION_EXEC_PID=$!
+
+SESSION_READY=false
+for _ in $(seq 1 100); do
+    if podman exec "$CONTAINER_NAME" test -f "$XDG_RUNTIME_DIR/bootsybox-session-ready" \
+        >/dev/null 2>&1; then
+        promote_ready_image
+        SESSION_READY=true
+        break
+    fi
+    if ! kill -0 "$SESSION_EXEC_PID" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+done
+
+SESSION_STATUS=0
+wait "$SESSION_EXEC_PID" || SESSION_STATUS=$?
+
+if [ "$SESSION_READY" = false ] &&
+   podman exec "$CONTAINER_NAME" test -f "$XDG_RUNTIME_DIR/bootsybox-session-ready" \
+       >/dev/null 2>&1; then
+    promote_ready_image
+    SESSION_READY=true
+fi
+
+if [ "$SESSION_READY" = false ]; then
     printf '%s\n' "$SELECTED_IMAGE_ID" > "$FAILED_IMAGE_FILE"
     fail "desktop image exited before reaching a Wayland-ready state"
 fi

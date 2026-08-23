@@ -34,12 +34,12 @@ immutable image ID as staged without disturbing the running session. Login only
 activates a staged digest or starts the current environment; it does not contact
 the registry on every session.
 
-A session that reaches a Wayland-ready state records its immutable image ID as
-the last known good version and retains the preceding known-good ID in a
-separate rollback slot. If a staged image exits before readiness, the next login
-removes that stage and returns to the cached last-known-good image. `bootsybox
-desktop rollback --apply` activates the rollback slot and preserves the current
-good image so rollback can be toggled deliberately.
+A session that reaches a Wayland-ready state immediately records its immutable
+image ID as the last known good version and retains the preceding known-good ID
+in a separate rollback slot. If a staged image exits before readiness, the next
+login removes that stage and returns to the cached last-known-good image.
+`bootsybox desktop rollback --apply` activates the rollback slot and preserves
+the current good image so rollback can be toggled deliberately.
 
 CI publishes the Fedora channel tag, a dated commit-specific tag and a full
 commit-derived tag. Image IDs remain cached locally for rollback; pruning them
