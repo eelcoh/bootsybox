@@ -8,7 +8,9 @@ usage() {
     exit 2
 }
 
-[ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+    usage
+fi
 [ -S "$SOCKET" ] || { echo "Bootsybox update service is unavailable" >&2; exit 1; }
 
 SCOPE=$1

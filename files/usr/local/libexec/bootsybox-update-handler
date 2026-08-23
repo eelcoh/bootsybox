@@ -131,6 +131,8 @@ host_upgrade() {
 request_logout() {
     local niri_socket
     as_user podman container exists "$CONTAINER_NAME" || return 0
+    # The inner shell, not this handler, expands the socket variable.
+    # shellcheck disable=SC2016
     niri_socket=$(as_user podman exec "$CONTAINER_NAME" /bin/bash -c \
         'for socket in /run/user/*/niri.*.sock; do [ -S "$socket" ] && { echo "$socket"; exit; }; done') || true
     [ -n "$niri_socket" ] || fail "could not locate the running niri IPC socket"
