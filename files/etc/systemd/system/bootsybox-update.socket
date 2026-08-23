@@ -1,0 +1,12 @@
+[Unit]
+Description=Bootsybox update broker socket
+
+[Socket]
+ListenStream=/run/bootsybox-update.sock
+SocketMode=0660
+SocketGroup=wheel
+RemoveOnStop=yes
+Accept=yes
+
+[Install]
+WantedBy=sockets.target

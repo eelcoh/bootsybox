@@ -182,6 +182,11 @@ This is the next priority because the current qcow2 is installed from a local
 development image reference and therefore has no usable production update
 origin.
 
+Implementation status: the host publication workflow, remote-origin VM build,
+narrow update broker/client, explicit desktop staging, session-boundary
+activation and last-known-good rollback are implemented in the repository.
+Publication and the full VM update/rollback matrix remain to be accepted.
+
 - Add CI for the customized Bootsybox host image.
 - Publish Fedora-channel, dated commit-specific and full-SHA tags.
 - Build qcow2 artifacts from the published host reference.

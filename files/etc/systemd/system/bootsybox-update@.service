@@ -1,0 +1,9 @@
+[Unit]
+Description=Bootsybox update request
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/bootsybox-update-handler
+StandardInput=socket
+StandardOutput=socket
+StandardError=socket

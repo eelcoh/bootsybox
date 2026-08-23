@@ -26,18 +26,29 @@ and `/var`, can disappear at any login. Installing RPMs or editing system files
 interactively is unsupported. Such changes belong in `desktop/Containerfile` so
 they are reproducible and upgradeable.
 
-## Updates and rollback
+## Desktop updates and rollback
 
-The host pulls the declared moving tag, checks the desktop API label, then stages
-and validates a candidate container before replacing the current container. A
-session that reaches a Wayland-ready state records its immutable image ID as the
-last known good version. If a new image exits before readiness, subsequent
-logins use the cached last-known-good image until the moving tag points to a new
-image ID.
+The first login bootstraps the declared moving tag. After that, `bootsybox
+desktop upgrade` pulls the tag, checks the desktop API label and records its
+immutable image ID as staged without disturbing the running session. Login only
+activates a staged digest or starts the current environment; it does not contact
+the registry on every session.
+
+A session that reaches a Wayland-ready state records its immutable image ID as
+the last known good version and retains the preceding known-good ID in a
+separate rollback slot. If a staged image exits before readiness, the next login
+removes that stage and returns to the cached last-known-good image. `bootsybox
+desktop rollback --apply` activates the rollback slot and preserves the current
+good image so rollback can be toggled deliberately.
 
 CI publishes the Fedora channel tag, a dated commit-specific tag and a full
 commit-derived tag. Image IDs remain cached locally for rollback; pruning them
 also removes that rollback option.
+
+Host updates remain bootc deployments. The root-owned update broker exposes a
+small command allowlist over `/run/bootsybox-update.sock`; it does not expose the
+host system bus. Socket access is restricted to `wheel`, and request parameters
+are validated before dispatching bootc or user-scoped rootless Podman commands.
 
 ## Trust model
 

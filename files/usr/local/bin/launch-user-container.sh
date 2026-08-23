@@ -10,12 +10,16 @@ CONTAINER_NAME="desktop-env-$USER"
 CANDIDATE_NAME="$CONTAINER_NAME-candidate"
 XDG_RUNTIME_DIR="/run/user/$USER_UID"
 SEATD_SOCK=/run/seatd.sock
+UPDATE_SOCK=/run/bootsybox-update.sock
 DESKTOP_IMAGE_FILE=/usr/share/bootsybox/desktop-image
 EXPECTED_DESKTOP_API=1
-EXPECTED_RUNTIME_API=2
+HOST_API=1
+EXPECTED_RUNTIME_API=3
 STATE_DIR="$HOME/.local/state/bootsybox"
 LAST_GOOD_FILE="$STATE_DIR/last-good-image"
+ROLLBACK_IMAGE_FILE="$STATE_DIR/rollback-image"
 FAILED_IMAGE_FILE="$STATE_DIR/failed-image"
+STAGED_IMAGE_FILE="$STATE_DIR/staged-image"
 
 fail() {
     echo "Bootsybox session failed: $*" >&2
@@ -30,6 +34,10 @@ image_id() {
 
 image_api() {
     podman image inspect --format '{{index .Labels "io.bootsybox.desktop.api"}}' "$1"
+}
+
+image_host_api() {
+    podman image inspect --format '{{index .Labels "io.bootsybox.desktop.host-api"}}' "$1"
 }
 
 container_image_id() {
@@ -61,6 +69,7 @@ create_container() {
         -e BOOTSYBOX_UID="$USER_UID" \
         -e BOOTSYBOX_GID="$USER_GID" \
         -v "$SEATD_SOCK:$SEATD_SOCK:rw" \
+        -v "$UPDATE_SOCK:$UPDATE_SOCK:rw" \
         -v /run/udev:/run/udev:ro \
         -v /dev/dri:/dev/dri:ro \
         -v "/var/home/$USER:/home/$USER:rw" \
@@ -71,40 +80,51 @@ create_container() {
 mkdir -p "$STATE_DIR"
 
 [ -S "$SEATD_SOCK" ] || fail "host seat broker is unavailable: $SEATD_SOCK"
+[ -S "$UPDATE_SOCK" ] || fail "host update broker is unavailable: $UPDATE_SOCK"
 [ -r "$DESKTOP_IMAGE_FILE" ] || fail "desktop image declaration is missing"
 
 DESKTOP_IMAGE=$(tr -d '[:space:]' < "$DESKTOP_IMAGE_FILE")
 [ -n "$DESKTOP_IMAGE" ] || fail "desktop image declaration is empty"
 
-echo "Synchronizing desktop image: $DESKTOP_IMAGE"
-if ! podman pull --quiet "$DESKTOP_IMAGE"; then
-    if podman image exists "$DESKTOP_IMAGE"; then
-        echo "warning: pull failed; using the cached desktop image" >&2
+SELECTED_IMAGE=
+SELECTED_IMAGE_ID=
+
+if [ -r "$STAGED_IMAGE_FILE" ]; then
+    STAGED_IMAGE=$(cat "$STAGED_IMAGE_FILE")
+    if podman image exists "$STAGED_IMAGE"; then
+        SELECTED_IMAGE=$STAGED_IMAGE
+        SELECTED_IMAGE_ID=$(image_id "$SELECTED_IMAGE")
+        echo "Activating staged desktop image: $SELECTED_IMAGE_ID"
     else
-        fail "unable to pull $DESKTOP_IMAGE and no cached image is available"
+        fail "staged desktop image is no longer cached"
     fi
+elif podman container exists "$CONTAINER_NAME"; then
+    SELECTED_IMAGE_ID=$(container_image_id "$CONTAINER_NAME")
+    SELECTED_IMAGE=$SELECTED_IMAGE_ID
+elif [ -r "$LAST_GOOD_FILE" ] && podman image exists "$(cat "$LAST_GOOD_FILE")"; then
+    SELECTED_IMAGE=$(cat "$LAST_GOOD_FILE")
+    SELECTED_IMAGE_ID=$(image_id "$SELECTED_IMAGE")
+else
+    echo "Bootstrapping desktop image: $DESKTOP_IMAGE"
+    podman pull "$DESKTOP_IMAGE" || fail "unable to bootstrap $DESKTOP_IMAGE"
+    SELECTED_IMAGE=$DESKTOP_IMAGE
+    SELECTED_IMAGE_ID=$(image_id "$SELECTED_IMAGE")
 fi
 
-DECLARED_IMAGE_ID=$(image_id "$DESKTOP_IMAGE")
-SELECTED_IMAGE=$DESKTOP_IMAGE
-SELECTED_IMAGE_ID=$DECLARED_IMAGE_ID
-
-# Do not retry a known-bad moving tag on every login. Fall back to the last
-# image that reached a Wayland-ready state; a newly published digest naturally
-# clears this condition.
 if [ -r "$FAILED_IMAGE_FILE" ] &&
-   [ "$(cat "$FAILED_IMAGE_FILE")" = "$DECLARED_IMAGE_ID" ] &&
-   [ -r "$LAST_GOOD_FILE" ]; then
-    LAST_GOOD_IMAGE=$(cat "$LAST_GOOD_FILE")
-    if podman image exists "$LAST_GOOD_IMAGE"; then
-        echo "warning: current image previously failed; using last known good image" >&2
-        SELECTED_IMAGE=$LAST_GOOD_IMAGE
-        SELECTED_IMAGE_ID=$(image_id "$SELECTED_IMAGE")
-    fi
+   [ "$(cat "$FAILED_IMAGE_FILE")" = "$SELECTED_IMAGE_ID" ] &&
+   [ -r "$LAST_GOOD_FILE" ] &&
+   podman image exists "$(cat "$LAST_GOOD_FILE")"; then
+    echo "warning: selected image previously failed; using last known good image" >&2
+    rm -f "$STAGED_IMAGE_FILE"
+    SELECTED_IMAGE=$(cat "$LAST_GOOD_FILE")
+    SELECTED_IMAGE_ID=$(image_id "$SELECTED_IMAGE")
 fi
 
 [ "$(image_api "$SELECTED_IMAGE")" = "$EXPECTED_DESKTOP_API" ] ||
-    fail "desktop image is incompatible with host API $EXPECTED_DESKTOP_API"
+    fail "desktop image API is incompatible with launcher API $EXPECTED_DESKTOP_API"
+[ "$(image_host_api "$SELECTED_IMAGE")" = "$HOST_API" ] ||
+    fail "desktop image requires an incompatible host API"
 
 REPLACE_CONTAINER=false
 if ! podman container exists "$CONTAINER_NAME"; then
@@ -159,12 +179,21 @@ podman exec \
     "$CONTAINER_NAME" /usr/local/bin/bootsybox-session || SESSION_STATUS=$?
 
 if podman exec "$CONTAINER_NAME" test -f "$XDG_RUNTIME_DIR/bootsybox-session-ready"; then
+    if [ -r "$LAST_GOOD_FILE" ] &&
+       [ "$(cat "$LAST_GOOD_FILE")" != "$SELECTED_IMAGE_ID" ]; then
+        cp "$LAST_GOOD_FILE" "$ROLLBACK_IMAGE_FILE"
+    fi
     printf '%s\n' "$SELECTED_IMAGE_ID" > "$LAST_GOOD_FILE"
-    if [ "$SELECTED_IMAGE_ID" = "$DECLARED_IMAGE_ID" ]; then
+    if [ -r "$STAGED_IMAGE_FILE" ] &&
+       [ "$(cat "$STAGED_IMAGE_FILE")" = "$SELECTED_IMAGE_ID" ]; then
+        rm -f "$STAGED_IMAGE_FILE"
+    fi
+    if [ ! -r "$FAILED_IMAGE_FILE" ] ||
+       [ "$(cat "$FAILED_IMAGE_FILE")" = "$SELECTED_IMAGE_ID" ]; then
         rm -f "$FAILED_IMAGE_FILE"
     fi
 else
-    printf '%s\n' "$DECLARED_IMAGE_ID" > "$FAILED_IMAGE_FILE"
+    printf '%s\n' "$SELECTED_IMAGE_ID" > "$FAILED_IMAGE_FILE"
     fail "desktop image exited before reaching a Wayland-ready state"
 fi
 

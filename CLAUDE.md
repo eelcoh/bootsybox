@@ -18,10 +18,12 @@ are authoritative.
 - greetd/agreety authenticates on VT1.
 - seatd owns the physical seat and exposes `/run/seatd.sock` to members of
   `bootsybox-seat`.
-- `launch-user-container.sh` pulls the declared desktop image, validates its API,
-  stages a candidate, and replaces an outdated outer container while preserving
-  the bind-mounted home. Failed images fall back to the cached last-known-good
-  image.
+- `launch-user-container.sh` bootstraps the declared desktop image once, then
+  activates explicitly staged immutable image IDs while preserving the
+  bind-mounted home. Failed images fall back to the cached last-known-good image.
+- `bootsybox-update.socket` is a narrow root-owned update broker, accessible to
+  `wheel`. The desktop's `bootsybox` client uses it for bootc and user-scoped
+  desktop lifecycle operations without exposing the host system bus.
 - The container receives the seatd socket, read-only udev/DRM discovery data,
   the user's home and machine ID. It does not receive host VTs, the host runtime
   directory or the host system bus.
@@ -54,6 +56,7 @@ files/                                files copied into the host image
 docs/ROADMAP.md                       staged project plan
 docs/PERSISTENCE.md                   state, upgrade and trust contract
 .github/workflows/build-desktop.yml   GHCR publisher
+.github/workflows/build-host.yml      customized bootc host publisher
 scripts/                              image-builder and QEMU helpers
 ```
 
@@ -65,13 +68,33 @@ Build the desktop image locally:
 podman build -f desktop/Containerfile -t ghcr.io/eelcoh/bootsybox-desktop:44 .
 ```
 
-Build the host image and VM using the same rootful Podman storage:
+Build the host image locally, or build a VM from the published upgradeable
+origin:
 
 ```bash
 sudo podman build -f Containerfile -t bootsybox-host:dev .
 cd scripts
 ./createvm.sh
 ./startvm.sh
+```
+
+Override the VM source for local development with
+`BOOTSYBOX_HOST_IMAGE=localhost/bootsybox-host:dev ./createvm.sh`.
+
+Lifecycle commands available inside the desktop include:
+
+```bash
+bootsybox host status
+bootsybox host upgrade --check
+bootsybox host upgrade
+bootsybox host upgrade --apply
+bootsybox host rollback --apply
+
+bootsybox desktop status
+bootsybox desktop upgrade --check
+bootsybox desktop upgrade
+bootsybox desktop upgrade --apply
+bootsybox desktop rollback --apply
 ```
 
 The image-builder test account is `testuser` / `testpass`; SSH is forwarded to
@@ -101,6 +124,6 @@ cat ~/.local/state/bootsybox/session.log
 ```
 
 The QEMU launcher uses `virtio-vga-gl`; plain virtio VGA exposes only software
-EGL in this VM and niri refuses it. Do not reintroduce direct VT/input mounts,
-`--privileged`, host PID/IPC namespaces or `chvt` capabilities. Diagnose the
-seatd/socket boundary instead.
+EGL in this VM and niri refuses it. Do not add direct VT/input mounts, host
+PID/IPC namespaces or `chvt` capabilities. Rootless privileged mode exists only
+to support nested Bubblewrap and does not replace seatd ownership of the seat.

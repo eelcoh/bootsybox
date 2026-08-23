@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+
+SOCKET=${BOOTSYBOX_UPDATE_SOCKET:-/run/bootsybox-update.sock}
+
+usage() {
+    echo "usage: bootsybox {host|desktop} {status|upgrade|rollback} [--check|--apply]" >&2
+    exit 2
+}
+
+[ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
+[ -S "$SOCKET" ] || { echo "Bootsybox update service is unavailable" >&2; exit 1; }
+
+SCOPE=$1
+ACTION=$2
+OPTION=${3:-none}
+case "$SCOPE:$ACTION:$OPTION" in
+    host:status:none|host:upgrade:none|host:upgrade:--check|host:upgrade:--apply|host:rollback:--apply|\
+    desktop:status:none|desktop:upgrade:none|desktop:upgrade:--check|desktop:upgrade:--apply|desktop:rollback:--apply)
+        ;;
+    *) usage ;;
+esac
+
+printf '%s %s %s %s\n' "$SCOPE" "$ACTION" "$OPTION" "$(id -un)" |
+    socat - "UNIX-CONNECT:$SOCKET"

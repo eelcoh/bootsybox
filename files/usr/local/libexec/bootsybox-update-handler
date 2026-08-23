@@ -1,0 +1,125 @@
+#!/bin/bash
+set -euo pipefail
+
+DESKTOP_IMAGE_FILE=/usr/share/bootsybox/desktop-image
+EXPECTED_DESKTOP_API=1
+HOST_API=1
+
+fail() {
+    echo "error: $*" >&2
+    exit 1
+}
+
+read -r SCOPE ACTION OPTION REQUEST_USER EXTRA || fail "invalid request"
+[ -z "${EXTRA:-}" ] || fail "invalid request"
+[[ "$REQUEST_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || fail "invalid user"
+id "$REQUEST_USER" >/dev/null 2>&1 || fail "unknown user"
+id -nG "$REQUEST_USER" | tr ' ' '\n' | grep -qx wheel || fail "user is not an administrator"
+
+REQUEST_UID=$(id -u "$REQUEST_USER")
+REQUEST_HOME=$(getent passwd "$REQUEST_USER" | cut -d: -f6)
+STATE_DIR="$REQUEST_HOME/.local/state/bootsybox"
+STAGED_FILE="$STATE_DIR/staged-image"
+LAST_GOOD_FILE="$STATE_DIR/last-good-image"
+ROLLBACK_FILE="$STATE_DIR/rollback-image"
+FAILED_FILE="$STATE_DIR/failed-image"
+CONTAINER_NAME="desktop-env-$REQUEST_USER"
+DESKTOP_IMAGE=$(tr -d '[:space:]' < "$DESKTOP_IMAGE_FILE")
+
+as_user() {
+    runuser -u "$REQUEST_USER" -- env \
+        HOME="$REQUEST_HOME" \
+        USER="$REQUEST_USER" \
+        XDG_RUNTIME_DIR="/run/user/$REQUEST_UID" \
+        "$@"
+}
+
+write_state() {
+    local file=$1
+    local value=$2
+    install -d -m 0700 -o "$REQUEST_UID" -g "$(id -g "$REQUEST_USER")" "$STATE_DIR"
+    printf '%s\n' "$value" > "$file"
+    chown "$REQUEST_UID:$(id -g "$REQUEST_USER")" "$file"
+    chmod 0600 "$file"
+}
+
+desktop_status() {
+    echo "declared: $DESKTOP_IMAGE"
+    if as_user podman container exists "$CONTAINER_NAME"; then
+        echo "running-image: $(as_user podman container inspect --format '{{.Image}}' "$CONTAINER_NAME")"
+    else
+        echo "running-image: none"
+    fi
+    echo "staged-image: $(cat "$STAGED_FILE" 2>/dev/null || echo none)"
+    echo "last-known-good: $(cat "$LAST_GOOD_FILE" 2>/dev/null || echo none)"
+    echo "rollback-image: $(cat "$ROLLBACK_FILE" 2>/dev/null || echo none)"
+    echo "failed-image: $(cat "$FAILED_FILE" 2>/dev/null || echo none)"
+}
+
+desktop_check() {
+    local remote_digest local_digest
+    remote_digest=$(skopeo inspect --format '{{.Digest}}' "docker://$DESKTOP_IMAGE")
+    local_digest=$(as_user podman image inspect --format '{{.Digest}}' "$DESKTOP_IMAGE" 2>/dev/null || true)
+    echo "remote-digest: $remote_digest"
+    echo "local-digest: ${local_digest:-none}"
+    if [ "$remote_digest" = "$local_digest" ]; then
+        echo "update-available: no"
+    else
+        echo "update-available: yes"
+    fi
+}
+
+desktop_stage() {
+    local image_id image_api required_host_api
+    as_user podman pull "$DESKTOP_IMAGE"
+    image_id=$(as_user podman image inspect --format '{{.Id}}' "$DESKTOP_IMAGE")
+    image_api=$(as_user podman image inspect --format '{{index .Labels "io.bootsybox.desktop.api"}}' "$DESKTOP_IMAGE")
+    required_host_api=$(as_user podman image inspect --format '{{index .Labels "io.bootsybox.desktop.host-api"}}' "$DESKTOP_IMAGE")
+    [ "$image_api" = "$EXPECTED_DESKTOP_API" ] || fail "desktop API $image_api is incompatible"
+    [ "$required_host_api" = "$HOST_API" ] || fail "desktop requires host API $required_host_api"
+    write_state "$STAGED_FILE" "$image_id"
+    rm -f "$FAILED_FILE"
+    echo "staged-image: $image_id"
+}
+
+request_logout() {
+    local niri_socket
+    as_user podman container exists "$CONTAINER_NAME" || return 0
+    niri_socket=$(as_user podman exec "$CONTAINER_NAME" /bin/bash -c \
+        'for socket in /run/user/*/niri.*.sock; do [ -S "$socket" ] && { echo "$socket"; exit; }; done') || true
+    [ -n "$niri_socket" ] || fail "could not locate the running niri IPC socket"
+    as_user podman exec \
+        -u "$REQUEST_UID" \
+        -e NIRI_SOCKET="$niri_socket" \
+        "$CONTAINER_NAME" niri msg action quit || fail "could not request graphical logout"
+}
+
+desktop_apply() {
+    [ -r "$STAGED_FILE" ] || desktop_stage
+    echo "The staged desktop will be activated when this session exits."
+    request_logout
+}
+
+desktop_rollback() {
+    [ -r "$ROLLBACK_FILE" ] || fail "no rollback desktop image"
+    local image_id
+    image_id=$(cat "$ROLLBACK_FILE")
+    as_user podman image exists "$image_id" || fail "rollback image is no longer cached"
+    write_state "$STAGED_FILE" "$image_id"
+    echo "staged rollback image: $image_id"
+    request_logout
+}
+
+case "$SCOPE:$ACTION:$OPTION" in
+    host:status:none) exec bootc status ;;
+    host:upgrade:--check) exec bootc upgrade --check ;;
+    host:upgrade:none) exec bootc upgrade ;;
+    host:upgrade:--apply) exec bootc upgrade --apply ;;
+    host:rollback:--apply) exec bootc rollback --apply ;;
+    desktop:status:none) desktop_status ;;
+    desktop:upgrade:--check) desktop_check ;;
+    desktop:upgrade:none) desktop_stage ;;
+    desktop:upgrade:--apply) desktop_apply ;;
+    desktop:rollback:--apply) desktop_rollback ;;
+    *) fail "unsupported operation" ;;
+esac

@@ -1,12 +1,14 @@
 FROM quay.io/fedora/fedora-bootc:44
 
-LABEL io.bootsybox.host.desktop-api="1"
+LABEL io.bootsybox.host.api="1" \
+      io.bootsybox.host.desktop-api="1"
 
 RUN dnf -y install \
         greetd \
         podman \
         seatd \
         shadow-utils \
+        skopeo \
         audit \
     && dnf clean all
 
@@ -23,12 +25,19 @@ RUN mkdir -p /usr/share/bootsybox
 RUN groupadd -r bootsybox-seat
 
 COPY files/usr/local/bin/launch-user-container.sh /usr/local/bin/launch-user-container.sh
+COPY files/usr/local/bin/bootsybox /usr/local/bin/bootsybox
+COPY files/usr/local/libexec/bootsybox-update-handler /usr/local/libexec/bootsybox-update-handler
 COPY files/etc/greetd/config.toml /etc/greetd/config.toml
+COPY files/etc/systemd/system/bootsybox-update.socket /etc/systemd/system/bootsybox-update.socket
+COPY files/etc/systemd/system/bootsybox-update@.service /etc/systemd/system/bootsybox-update@.service
 COPY files/etc/systemd/system/seatd.service.d/10-bootsybox.conf /etc/systemd/system/seatd.service.d/10-bootsybox.conf
 COPY files/etc/systemd/system/greetd.service.d/10-seatd.conf /etc/systemd/system/greetd.service.d/10-seatd.conf
 COPY files/etc/systemd/system/bootsybox-containers.slice /etc/systemd/system/bootsybox-containers.slice
 COPY files/usr/share/bootsybox/desktop-image /usr/share/bootsybox/desktop-image
 
-RUN chmod 0755 /usr/local/bin/launch-user-container.sh
+RUN chmod 0755 \
+        /usr/local/bin/bootsybox \
+        /usr/local/bin/launch-user-container.sh \
+        /usr/local/libexec/bootsybox-update-handler
 
-RUN systemctl enable seatd greetd
+RUN systemctl enable bootsybox-update.socket seatd greetd
