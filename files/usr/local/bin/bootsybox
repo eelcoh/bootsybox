@@ -21,5 +21,10 @@ case "$SCOPE:$ACTION:$OPTION" in
     *) usage ;;
 esac
 
+# A check may spend more than socat's default half-second EOF grace period in
+# skopeo or bootc. Keep the response side open for long-running operations;
+# socat still exits immediately when the broker closes normally. Otherwise the
+# handler writes into a closed socket (and bootc currently aborts on that
+# broken pipe).
 printf '%s %s %s %s\n' "$SCOPE" "$ACTION" "$OPTION" "$(id -un)" |
-    socat - "UNIX-CONNECT:$SOCKET"
+    socat -t 3600 STDIO "UNIX-CONNECT:$SOCKET"
