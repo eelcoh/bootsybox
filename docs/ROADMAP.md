@@ -162,9 +162,10 @@ repeat login work without fatal journal errors.
 
 ## Phase 3: persistence contract
 
-Implementation status: the persistence contract, staged replacement, immediate
-readiness promotion and fallback/rollback state are implemented. Destructive
-replacement, migration and rollback still require VM acceptance testing.
+Implementation and VM acceptance status: complete. The persistence contract,
+staged replacement, immediate readiness promotion and fallback/rollback state
+are implemented. A published desktop update was staged, activated, promoted
+after Wayland readiness and rolled back while preserving the user's home.
 
 - Treat the outer container filesystem as disposable and never install packages
   into it interactively.
@@ -176,15 +177,14 @@ replacement, migration and rollback still require VM acceptance testing.
 
 ## Phase 4: transactional host and desktop lifecycle
 
-This is the next priority because the current qcow2 is installed from a local
-development image reference and therefore has no usable production update
-origin.
-
 Implementation status: the host publication workflow, remote-origin VM build,
 narrow update broker/client, explicit desktop staging, session-boundary
-activation and last-known-good rollback are implemented in the repository.
-Host and desktop update checks pass in the VM. This release creates new targets
-for staging, apply and rollback acceptance.
+activation and last-known-good rollback are implemented. VM acceptance proved
+host update discovery and application plus the complete desktop check, stage,
+apply, readiness-promotion and rollback lifecycle. User state and Flatpaks
+survived the replacement. A slow-response regression test covers the broker
+disconnect that was found during acceptance. Host rollback and incompatible-pair
+rejection remain to be exercised in the VM.
 
 - Add CI for the customized Bootsybox host image.
 - Publish Fedora-channel, dated commit-specific and full-SHA tags.

@@ -1,0 +1,36 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shell test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck socat
+
+      - name: Check shell scripts
+        run: |
+          shellcheck \
+            files/usr/local/bin/bootsybox \
+            files/usr/local/libexec/bootsybox-check-compatibility \
+            files/usr/local/libexec/bootsybox-update-handler \
+            tests/*.sh
+
+      - name: Test compatibility contract
+        run: tests/compatibility-contract.sh
+
+      - name: Test update client protocol
+        run: |
+          tests/update-client-slow-response.sh
+          tests/update-client-error-status.sh
+          tests/update-client-legacy-server.sh

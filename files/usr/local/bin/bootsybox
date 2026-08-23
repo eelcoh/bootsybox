@@ -27,4 +27,25 @@ esac
 # handler writes into a closed socket (and bootc currently aborts on that
 # broken pipe).
 printf '%s %s %s %s\n' "$SCOPE" "$ACTION" "$OPTION" "$(id -un)" |
-    socat -t 3600 STDIO "UNIX-CONNECT:$SOCKET"
+    socat -t 3600 STDIO "UNIX-CONNECT:$SOCKET" |
+    awk '
+        /^__BOOTSYBOX_PROTOCOL__ 1$/ {
+            protocol = 1
+            next
+        }
+        /^__BOOTSYBOX_RESULT__ [0-9]+$/ {
+            seen = 1
+            result = $2
+            next
+        }
+        { print; fflush() }
+        END {
+            if (protocol && !seen) {
+                print "error: update service ended without a result" > "/dev/stderr"
+                exit 1
+            }
+            if (!protocol)
+                exit 0
+            exit (result == 0 ? 0 : 1)
+        }
+    '

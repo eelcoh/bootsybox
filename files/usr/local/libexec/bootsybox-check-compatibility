@@ -1,0 +1,28 @@
+#!/bin/bash
+set -euo pipefail
+
+[ "$#" -eq 4 ] || {
+    echo "error: compatibility checker requires four API values" >&2
+    exit 2
+}
+
+HOST_API=$1
+HOST_DESKTOP_API=$2
+DESKTOP_API=$3
+DESKTOP_HOST_API=$4
+
+[ -n "$HOST_API" ] || { echo "error: host API label is missing" >&2; exit 1; }
+[ -n "$HOST_DESKTOP_API" ] || { echo "error: host desktop API label is missing" >&2; exit 1; }
+[ -n "$DESKTOP_API" ] || { echo "error: desktop API label is missing" >&2; exit 1; }
+[ -n "$DESKTOP_HOST_API" ] || { echo "error: desktop host API label is missing" >&2; exit 1; }
+
+[ "$HOST_DESKTOP_API" = "$DESKTOP_API" ] || {
+    echo "error: host supports desktop API $HOST_DESKTOP_API, desktop uses API $DESKTOP_API" >&2
+    exit 1
+}
+[ "$HOST_API" = "$DESKTOP_HOST_API" ] || {
+    echo "error: desktop requires host API $DESKTOP_HOST_API, host provides API $HOST_API" >&2
+    exit 1
+}
+
+echo "compatibility: host API $HOST_API, desktop API $DESKTOP_API"

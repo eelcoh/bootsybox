@@ -2,8 +2,22 @@
 set -euo pipefail
 
 DESKTOP_IMAGE_FILE=/usr/share/bootsybox/desktop-image
+HOST_IMAGE=ghcr.io/eelcoh/bootsybox-host:44
+COMPATIBILITY_CHECKER=/usr/local/libexec/bootsybox-check-compatibility
 EXPECTED_DESKTOP_API=1
 HOST_API=1
+RESULT_PREFIX=__BOOTSYBOX_RESULT__
+PROTOCOL_PREFIX=__BOOTSYBOX_PROTOCOL__
+
+emit_result() {
+    local rc=$?
+    trap - EXIT
+    printf '%s %s\n' "$RESULT_PREFIX" "$rc"
+    exit "$rc"
+}
+
+trap emit_result EXIT
+printf '%s 1\n' "$PROTOCOL_PREFIX"
 
 fail() {
     echo "error: $*" >&2
@@ -75,11 +89,43 @@ desktop_stage() {
     image_id=$(as_user podman image inspect --format '{{.Id}}' "$DESKTOP_IMAGE")
     image_api=$(as_user podman image inspect --format '{{index .Labels "io.bootsybox.desktop.api"}}' "$DESKTOP_IMAGE")
     required_host_api=$(as_user podman image inspect --format '{{index .Labels "io.bootsybox.desktop.host-api"}}' "$DESKTOP_IMAGE")
-    [ "$image_api" = "$EXPECTED_DESKTOP_API" ] || fail "desktop API $image_api is incompatible"
-    [ "$required_host_api" = "$HOST_API" ] || fail "desktop requires host API $required_host_api"
+    "$COMPATIBILITY_CHECKER" "$HOST_API" "$EXPECTED_DESKTOP_API" "$image_api" "$required_host_api"
     write_state "$STAGED_FILE" "$image_id"
     rm -f "$FAILED_FILE"
     echo "staged-image: $image_id"
+}
+
+selected_desktop_image() {
+    if [ -r "$STAGED_FILE" ] && as_user podman image exists "$(cat "$STAGED_FILE")"; then
+        cat "$STAGED_FILE"
+    elif as_user podman container exists "$CONTAINER_NAME"; then
+        as_user podman container inspect --format '{{.Image}}' "$CONTAINER_NAME"
+    elif [ -r "$LAST_GOOD_FILE" ] && as_user podman image exists "$(cat "$LAST_GOOD_FILE")"; then
+        cat "$LAST_GOOD_FILE"
+    else
+        echo "$DESKTOP_IMAGE"
+    fi
+}
+
+host_preflight() {
+    local candidate_host_api candidate_desktop_api desktop_image desktop_api required_host_api
+    candidate_host_api=$(skopeo inspect --format '{{index .Labels "io.bootsybox.host.api"}}' "docker://$HOST_IMAGE")
+    candidate_desktop_api=$(skopeo inspect --format '{{index .Labels "io.bootsybox.host.desktop-api"}}' "docker://$HOST_IMAGE")
+    desktop_image=$(selected_desktop_image)
+    if as_user podman image exists "$desktop_image"; then
+        desktop_api=$(as_user podman image inspect --format '{{index .Labels "io.bootsybox.desktop.api"}}' "$desktop_image")
+        required_host_api=$(as_user podman image inspect --format '{{index .Labels "io.bootsybox.desktop.host-api"}}' "$desktop_image")
+    else
+        desktop_api=$EXPECTED_DESKTOP_API
+        required_host_api=$HOST_API
+    fi
+    "$COMPATIBILITY_CHECKER" \
+        "$candidate_host_api" "$candidate_desktop_api" "$desktop_api" "$required_host_api"
+}
+
+host_upgrade() {
+    host_preflight
+    bootc upgrade "$@"
 }
 
 request_logout() {
@@ -111,11 +157,11 @@ desktop_rollback() {
 }
 
 case "$SCOPE:$ACTION:$OPTION" in
-    host:status:none) exec bootc status ;;
-    host:upgrade:--check) exec bootc upgrade --check ;;
-    host:upgrade:none) exec bootc upgrade ;;
-    host:upgrade:--apply) exec bootc upgrade --apply ;;
-    host:rollback:--apply) exec bootc rollback --apply ;;
+    host:status:none) bootc status ;;
+    host:upgrade:--check) host_upgrade --check ;;
+    host:upgrade:none) host_upgrade ;;
+    host:upgrade:--apply) host_upgrade --apply ;;
+    host:rollback:--apply) bootc rollback --apply ;;
     desktop:status:none) desktop_status ;;
     desktop:upgrade:--check) desktop_check ;;
     desktop:upgrade:none) desktop_stage ;;

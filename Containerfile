@@ -27,6 +27,7 @@ RUN groupadd -r bootsybox-seat
 COPY files/usr/local/bin/launch-user-container.sh /usr/local/bin/launch-user-container.sh
 COPY files/usr/local/bin/bootsybox /usr/local/bin/bootsybox
 COPY files/usr/local/libexec/bootsybox-update-handler /usr/local/libexec/bootsybox-update-handler
+COPY files/usr/local/libexec/bootsybox-check-compatibility /usr/local/libexec/bootsybox-check-compatibility
 COPY files/etc/greetd/config.toml /etc/greetd/config.toml
 COPY files/etc/systemd/system/bootsybox-update.socket /etc/systemd/system/bootsybox-update.socket
 COPY files/etc/systemd/system/bootsybox-update@.service /etc/systemd/system/bootsybox-update@.service
@@ -38,6 +39,7 @@ COPY files/usr/share/bootsybox/desktop-image /usr/share/bootsybox/desktop-image
 RUN chmod 0755 \
         /usr/local/bin/bootsybox \
         /usr/local/bin/launch-user-container.sh \
+        /usr/local/libexec/bootsybox-check-compatibility \
         /usr/local/libexec/bootsybox-update-handler
 
 RUN systemctl enable bootsybox-update.socket seatd greetd

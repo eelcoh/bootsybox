@@ -49,6 +49,16 @@ Host updates remain bootc deployments. The root-owned update broker exposes a
 small command allowlist over `/run/bootsybox-update.sock`; it does not expose the
 host system bus. Socket access is restricted to `wheel`, and request parameters
 are validated before dispatching bootc or user-scoped rootless Podman commands.
+The broker announces its protocol and terminates every response with an explicit
+result status, allowing the unprivileged client to propagate failures instead
+of treating a disconnected service as success. New clients remain compatible
+with the earlier text-only broker during independent host/desktop upgrades.
+
+Before a host update is checked, staged or applied, the broker compares the
+candidate host API and supported desktop API labels with the selected desktop
+image's API and required host API labels. Desktop staging performs the same
+four-label check in the opposite direction. Missing or mismatched metadata
+rejects the candidate before logout or reboot.
 
 ## Trust model
 
