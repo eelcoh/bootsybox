@@ -165,6 +165,8 @@ fi
 podman start "$CONTAINER_NAME" >/dev/null
 podman exec "$CONTAINER_NAME" rm -f "$XDG_RUNTIME_DIR/bootsybox-session-ready"
 
+# Invoked indirectly by the EXIT trap.
+# shellcheck disable=SC2317
 cleanup() {
     podman stop --time 10 "$CONTAINER_NAME" >/dev/null 2>&1 || true
 }
