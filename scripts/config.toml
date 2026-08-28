@@ -3,3 +3,10 @@ name = "testuser"
 password = "testpass"                                                                                                                                                    
 groups = ["wheel", "bootsybox-seat"]
 key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEpFnRKx2ZNdK8CBOcaQByEOMOCmCdrU6BY0gSlcLtMR ehoekema@gmail.com"
+
+# Transactional desktop updates retain the running, rollback and candidate OCI
+# images at the same time. The image-builder default is too small for that
+# contract once Flatpaks and user container storage are present.
+[[customizations.filesystem]]
+mountpoint = "/"
+minsize = "20 GiB"

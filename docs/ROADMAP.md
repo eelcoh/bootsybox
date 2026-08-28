@@ -198,6 +198,9 @@ exercised in the VM.
 - Move desktop image pulling out of the login-critical path; login should only
   activate an already validated staged image or the current known-good image.
 - Test host/desktop API compatibility across update and rollback combinations.
+- Size the root filesystem to retain running, rollback and candidate desktop
+  images concurrently; the initial image-builder default exhausted `/var`
+  during acceptance, so generated VMs now use a 20 GiB minimum root.
 - Add user-visible update state and reboot-required reporting before considering
   automatic application.
 
