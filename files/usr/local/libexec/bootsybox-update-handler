@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-DESKTOP_IMAGE_FILE=/usr/share/bootsybox/desktop-image
+DEFAULT_DESKTOP_IMAGE_FILE=/usr/share/bootsybox/desktop-image
+OVERRIDE_DESKTOP_IMAGE_FILE=/etc/bootsybox/desktop-image
 HOST_IMAGE=ghcr.io/eelcoh/bootsybox-host:44
 COMPATIBILITY_CHECKER=/usr/local/libexec/bootsybox-check-compatibility
 EXPECTED_DESKTOP_API=1
@@ -37,7 +38,14 @@ STAGED_FILE="$STATE_DIR/staged-image"
 LAST_GOOD_FILE="$STATE_DIR/last-good-image"
 ROLLBACK_FILE="$STATE_DIR/rollback-image"
 FAILED_FILE="$STATE_DIR/failed-image"
+AVAILABLE_FILE="$STATE_DIR/available-image"
+AVAILABLE_VERSION_FILE="$STATE_DIR/available-version"
+UPDATE_AVAILABLE_FILE="$STATE_DIR/update-available"
 CONTAINER_NAME="desktop-env-$REQUEST_USER"
+DESKTOP_IMAGE_FILE=$DEFAULT_DESKTOP_IMAGE_FILE
+if [ -r "$OVERRIDE_DESKTOP_IMAGE_FILE" ]; then
+    DESKTOP_IMAGE_FILE=$OVERRIDE_DESKTOP_IMAGE_FILE
+fi
 DESKTOP_IMAGE=$(tr -d '[:space:]' < "$DESKTOP_IMAGE_FILE")
 
 as_user() {
@@ -58,29 +66,50 @@ write_state() {
 }
 
 desktop_status() {
+    local running_image staged_image
     echo "declared: $DESKTOP_IMAGE"
     if as_user podman container exists "$CONTAINER_NAME"; then
-        echo "running-image: $(as_user podman container inspect --format '{{.Image}}' "$CONTAINER_NAME")"
+        running_image=$(as_user podman container inspect --format '{{.Image}}' "$CONTAINER_NAME")
+        echo "running-image: $running_image"
+        echo "running-version: $(as_user podman image inspect --format '{{index .Labels "org.opencontainers.image.version"}}' "$running_image")"
+        echo "running-revision: $(as_user podman image inspect --format '{{index .Labels "org.opencontainers.image.revision"}}' "$running_image")"
     else
         echo "running-image: none"
+        echo "running-version: none"
+        echo "running-revision: none"
     fi
-    echo "staged-image: $(cat "$STAGED_FILE" 2>/dev/null || echo none)"
+    staged_image=$(cat "$STAGED_FILE" 2>/dev/null || echo none)
+    echo "staged-image: $staged_image"
+    if [ "$staged_image" != none ] && as_user podman image exists "$staged_image"; then
+        echo "staged-version: $(as_user podman image inspect --format '{{index .Labels "org.opencontainers.image.version"}}' "$staged_image")"
+    else
+        echo "staged-version: none"
+    fi
+    echo "available-image: $(cat "$AVAILABLE_FILE" 2>/dev/null || echo unknown-run-upgrade-check)"
+    echo "available-version: $(cat "$AVAILABLE_VERSION_FILE" 2>/dev/null || echo unknown-run-upgrade-check)"
+    echo "update-available: $(cat "$UPDATE_AVAILABLE_FILE" 2>/dev/null || echo unknown-run-upgrade-check)"
     echo "last-known-good: $(cat "$LAST_GOOD_FILE" 2>/dev/null || echo none)"
     echo "rollback-image: $(cat "$ROLLBACK_FILE" 2>/dev/null || echo none)"
     echo "failed-image: $(cat "$FAILED_FILE" 2>/dev/null || echo none)"
 }
 
 desktop_check() {
-    local remote_digest local_digest
-    remote_digest=$(skopeo inspect --format '{{.Digest}}' "docker://$DESKTOP_IMAGE")
+    local remote remote_digest remote_version local_digest available
+    remote=$(skopeo inspect --format '{{.Digest}}|{{index .Labels "org.opencontainers.image.version"}}' "docker://$DESKTOP_IMAGE")
+    remote_digest=${remote%%|*}
+    remote_version=${remote#*|}
     local_digest=$(as_user podman image inspect --format '{{.Digest}}' "$DESKTOP_IMAGE" 2>/dev/null || true)
-    echo "remote-digest: $remote_digest"
-    echo "local-digest: ${local_digest:-none}"
+    available=yes
     if [ "$remote_digest" = "$local_digest" ]; then
-        echo "update-available: no"
-    else
-        echo "update-available: yes"
+        available=no
     fi
+    write_state "$AVAILABLE_FILE" "$remote_digest"
+    write_state "$AVAILABLE_VERSION_FILE" "${remote_version:-unknown}"
+    write_state "$UPDATE_AVAILABLE_FILE" "$available"
+    echo "remote-digest: $remote_digest"
+    echo "remote-version: ${remote_version:-unknown}"
+    echo "local-digest: ${local_digest:-none}"
+    echo "update-available: $available"
 }
 
 desktop_stage() {

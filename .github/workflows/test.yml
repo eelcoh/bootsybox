@@ -22,6 +22,7 @@ jobs:
         run: |
           shellcheck \
             files/usr/local/bin/bootsybox \
+            files/usr/local/bin/launch-user-container.sh \
             files/usr/local/libexec/bootsybox-check-compatibility \
             files/usr/local/libexec/bootsybox-update-handler \
             tests/*.sh

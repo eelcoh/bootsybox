@@ -1,6 +1,11 @@
 FROM quay.io/fedora/fedora-bootc:44
 
-LABEL io.bootsybox.host.api="1" \
+ARG BOOTSYBOX_IMAGE_VERSION=development
+ARG BOOTSYBOX_IMAGE_REVISION=unknown
+
+LABEL org.opencontainers.image.version="$BOOTSYBOX_IMAGE_VERSION" \
+      org.opencontainers.image.revision="$BOOTSYBOX_IMAGE_REVISION" \
+      io.bootsybox.host.api="1" \
       io.bootsybox.host.desktop-api="1"
 
 RUN dnf -y install \

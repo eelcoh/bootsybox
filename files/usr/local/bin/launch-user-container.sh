@@ -11,7 +11,8 @@ CANDIDATE_NAME="$CONTAINER_NAME-candidate"
 XDG_RUNTIME_DIR="/run/user/$USER_UID"
 SEATD_SOCK=/run/seatd.sock
 UPDATE_SOCK=/run/bootsybox-update.sock
-DESKTOP_IMAGE_FILE=/usr/share/bootsybox/desktop-image
+DEFAULT_DESKTOP_IMAGE_FILE=/usr/share/bootsybox/desktop-image
+OVERRIDE_DESKTOP_IMAGE_FILE=/etc/bootsybox/desktop-image
 EXPECTED_DESKTOP_API=1
 HOST_API=1
 EXPECTED_RUNTIME_API=3
@@ -81,8 +82,12 @@ mkdir -p "$STATE_DIR"
 
 [ -S "$SEATD_SOCK" ] || fail "host seat broker is unavailable: $SEATD_SOCK"
 [ -S "$UPDATE_SOCK" ] || fail "host update broker is unavailable: $UPDATE_SOCK"
-[ -r "$DESKTOP_IMAGE_FILE" ] || fail "desktop image declaration is missing"
+[ -r "$DEFAULT_DESKTOP_IMAGE_FILE" ] || fail "desktop image declaration is missing"
 
+DESKTOP_IMAGE_FILE=$DEFAULT_DESKTOP_IMAGE_FILE
+if [ -r "$OVERRIDE_DESKTOP_IMAGE_FILE" ]; then
+    DESKTOP_IMAGE_FILE=$OVERRIDE_DESKTOP_IMAGE_FILE
+fi
 DESKTOP_IMAGE=$(tr -d '[:space:]' < "$DESKTOP_IMAGE_FILE")
 [ -n "$DESKTOP_IMAGE" ] || fail "desktop image declaration is empty"
 

@@ -45,6 +45,13 @@ CI publishes the Fedora channel tag, a dated commit-specific tag and a full
 commit-derived tag. Image IDs remain cached locally for rollback; pruning them
 also removes that rollback option.
 
+The image-owned declaration is `/usr/share/bootsybox/desktop-image`. An
+administrator may select a different channel by placing one OCI reference in
+`/etc/bootsybox/desktop-image`; removing that file returns to the image-owned
+default. This override is also used for compatibility acceptance tests. It does
+not bypass API checks: an incompatible image may be downloaded into the user's
+cache, but it is rejected before being staged or activated.
+
 Host updates remain bootc deployments. The root-owned update broker exposes a
 small command allowlist over `/run/bootsybox-update.sock`; it does not expose the
 host system bus. Socket access is restricted to `wheel`, and request parameters

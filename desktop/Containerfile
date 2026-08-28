@@ -1,5 +1,10 @@
 FROM quay.io/fedora/fedora-toolbox:44
 
+ARG BOOTSYBOX_IMAGE_VERSION=development
+ARG BOOTSYBOX_IMAGE_REVISION=unknown
+ARG BOOTSYBOX_DESKTOP_API=1
+ARG BOOTSYBOX_DESKTOP_HOST_API=1
+
 RUN dnf -y --setopt=install_weak_deps=False install \
         niri \
         waybar \
@@ -41,8 +46,9 @@ RUN chmod 0755 \
 LABEL org.opencontainers.image.title="Bootsybox desktop" \
       org.opencontainers.image.description="Reproducible rootless niri desktop for Bootsybox" \
       org.opencontainers.image.source="https://github.com/eelcoh/bootsybox" \
-      io.bootsybox.desktop.api="1" \
-      io.bootsybox.desktop.host-api="1" \
-      io.bootsybox.desktop.version="2"
+      org.opencontainers.image.version="$BOOTSYBOX_IMAGE_VERSION" \
+      org.opencontainers.image.revision="$BOOTSYBOX_IMAGE_REVISION" \
+      io.bootsybox.desktop.api="$BOOTSYBOX_DESKTOP_API" \
+      io.bootsybox.desktop.host-api="$BOOTSYBOX_DESKTOP_HOST_API"
 
 ENTRYPOINT ["/usr/local/bin/bootsybox-container-init"]

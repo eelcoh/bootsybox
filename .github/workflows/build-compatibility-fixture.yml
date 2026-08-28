@@ -1,0 +1,31 @@
+name: Build incompatible desktop fixture
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  incompatible-desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: desktop/Containerfile
+          push: true
+          build-args: |
+            BOOTSYBOX_IMAGE_VERSION=compatibility-test-host-api-999
+            BOOTSYBOX_IMAGE_REVISION=${{ github.sha }}
+            BOOTSYBOX_DESKTOP_HOST_API=999
+          tags: ghcr.io/${{ github.repository_owner }}/bootsybox-desktop:compat-test-host-api-999

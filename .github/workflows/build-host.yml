@@ -36,6 +36,9 @@ jobs:
           context: .
           file: Containerfile
           push: true
+          build-args: |
+            BOOTSYBOX_IMAGE_VERSION=44-${{ steps.release.outputs.date }}-${{ steps.release.outputs.short_sha }}
+            BOOTSYBOX_IMAGE_REVISION=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/bootsybox-host:44
             ghcr.io/${{ github.repository_owner }}/bootsybox-host:44-${{ steps.release.outputs.date }}-${{ steps.release.outputs.short_sha }}

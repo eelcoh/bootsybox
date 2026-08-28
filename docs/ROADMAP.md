@@ -183,8 +183,9 @@ activation and last-known-good rollback are implemented. VM acceptance proved
 host update discovery and application plus the complete desktop check, stage,
 apply, readiness-promotion and rollback lifecycle. User state and Flatpaks
 survived the replacement. A slow-response regression test covers the broker
-disconnect that was found during acceptance. Host rollback and incompatible-pair
-rejection remain to be exercised in the VM.
+disconnect that was found during acceptance. Host rollback and forward recovery
+were also exercised successfully. Incompatible-pair rejection remains to be
+exercised in the VM.
 
 - Add CI for the customized Bootsybox host image.
 - Publish Fedora-channel, dated commit-specific and full-SHA tags.
