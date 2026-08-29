@@ -177,15 +177,16 @@ after Wayland readiness and rolled back while preserving the user's home.
 
 ## Phase 4: transactional host and desktop lifecycle
 
-Implementation status: the host publication workflow, remote-origin VM build,
-narrow update broker/client, explicit desktop staging, session-boundary
-activation and last-known-good rollback are implemented. VM acceptance proved
-host update discovery and application plus the complete desktop check, stage,
-apply, readiness-promotion and rollback lifecycle. User state and Flatpaks
-survived the replacement. A slow-response regression test covers the broker
-disconnect that was found during acceptance. Host rollback and forward recovery
-were also exercised successfully. Incompatible-pair rejection remains to be
-exercised in the VM.
+Implementation and VM acceptance status: complete. The host publication
+workflow, remote-origin VM build, narrow update broker/client, explicit desktop
+staging, session-boundary activation and last-known-good rollback are
+implemented. Acceptance proved host discovery, staging, application, rollback
+and forward recovery plus the complete desktop check, stage, apply,
+readiness-promotion and rollback lifecycle. User state and Flatpaks survived.
+An intentionally incompatible desktop requiring host API 999 was downloaded
+but rejected with a nonzero result before staging; the running environment was
+unchanged. A slow-response regression test covers the broker disconnect found
+during acceptance.
 
 - Add CI for the customized Bootsybox host image.
 - Publish Fedora-channel, dated commit-specific and full-SHA tags.
@@ -209,6 +210,9 @@ desktop updates, preserves contracted state, refuses incompatible combinations,
 and can return both layers to their previous known-good deployments.
 
 ## Phase 5: nested containers
+
+This is the next priority now that both transactional image layers have a
+validated compatibility and recovery contract.
 
 - Verify rootless Distrobox/Podman nesting, storage, networking and logout.
 - Decide whether nested or host-managed sibling containers are the supported
