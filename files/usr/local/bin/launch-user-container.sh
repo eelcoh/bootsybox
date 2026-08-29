@@ -198,6 +198,7 @@ podman exec \
     -e XDG_SEAT=seat0 \
     -e LIBSEAT_BACKEND=seatd \
     -e SEATD_SOCK="$SEATD_SOCK" \
+    -e CONTAINERS_STORAGE_CONF=/etc/containers/storage-nested.conf \
     "$CONTAINER_NAME" /usr/local/bin/bootsybox-session &
 SESSION_EXEC_PID=$!
 

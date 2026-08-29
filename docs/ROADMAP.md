@@ -214,6 +214,11 @@ and can return both layers to their previous known-good deployments.
 This is the next priority now that both transactional image layers have a
 validated compatibility and recovery contract.
 
+Implementation status: Podman, Distrobox and `fuse-overlayfs` are included in
+the desktop image. Nested Podman receives a session-only storage configuration
+whose persistent graph root is separate from the host Podman database. Runtime,
+networking and lifecycle behavior still require VM acceptance.
+
 - Verify rootless Distrobox/Podman nesting, storage, networking and logout.
 - Decide whether nested or host-managed sibling containers are the supported
   model.

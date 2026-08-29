@@ -20,6 +20,8 @@ RUN dnf -y --setopt=install_weak_deps=False install \
         gnome-keyring \
         flatpak \
         distrobox \
+        podman \
+        fuse-overlayfs \
         mesa-dri-drivers \
         mesa-vulkan-drivers \
         dbus-daemon \
@@ -36,6 +38,7 @@ RUN install -D -m 0644 \
 
 COPY desktop/files/usr/local/bin/bootsybox-container-init /usr/local/bin/bootsybox-container-init
 COPY desktop/files/usr/local/bin/bootsybox-session /usr/local/bin/bootsybox-session
+COPY desktop/files/etc/containers/storage-nested.conf /etc/containers/storage-nested.conf
 COPY files/usr/local/bin/bootsybox /usr/local/bin/bootsybox
 
 RUN chmod 0755 \
