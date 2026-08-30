@@ -216,8 +216,12 @@ validated compatibility and recovery contract.
 
 Implementation status: Podman, Distrobox and `fuse-overlayfs` are included in
 the desktop image. Nested Podman receives a session-only storage configuration
-whose persistent graph root is separate from the host Podman database. Runtime,
-networking and lifecycle behavior still require VM acceptance.
+whose persistent graph root is separate from the host Podman database. The
+desktop user receives subordinate UID/GID ranges derived from the outer
+container's actual namespace maps so Distrobox can create nested user
+namespaces. The standard `newuidmap` and `newgidmap` helpers are setuid inside
+the deliberately non-isolating outer container so the user can apply those
+ranges. Runtime, networking and lifecycle behavior still require VM acceptance.
 
 - Verify rootless Distrobox/Podman nesting, storage, networking and logout.
 - Decide whether nested or host-managed sibling containers are the supported

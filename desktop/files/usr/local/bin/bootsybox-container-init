@@ -19,6 +19,38 @@ if ! getent passwd "$BOOTSYBOX_UID" >/dev/null; then
         "$BOOTSYBOX_USER"
 fi
 
+configure_subordinate_ids() {
+    local namespace_map=$1
+    local own_id=$2
+    local output=$3
+
+    # Nested rootless Podman can delegate only IDs which exist in the outer
+    # container's namespace. Authorize every mapped container-side ID except
+    # the desktop user's own ID, which Podman maps separately as container ID
+    # zero. Multiple entries are valid in subuid/subgid.
+    awk -v user="$BOOTSYBOX_USER" -v own_id="$own_id" '
+        {
+            start = $1
+            range_length = $3
+            end = start + range_length
+
+            if (own_id < start || own_id >= end) {
+                printf "%s:%d:%d\n", user, start, range_length
+                next
+            }
+            if (own_id > start) {
+                printf "%s:%d:%d\n", user, start, own_id - start
+            }
+            if (own_id + 1 < end) {
+                printf "%s:%d:%d\n", user, own_id + 1, end - own_id - 1
+            }
+        }
+    ' "$namespace_map" > "$output"
+}
+
+configure_subordinate_ids /proc/self/uid_map "$BOOTSYBOX_UID" /etc/subuid
+configure_subordinate_ids /proc/self/gid_map "$BOOTSYBOX_GID" /etc/subgid
+
 install -d \
     -m 0700 \
     -o "$BOOTSYBOX_UID" \

@@ -22,6 +22,9 @@ session-only `CONTAINERS_STORAGE_CONF`. It must not reuse
 `$HOME/.local/share/containers/storage`, which belongs to host Podman and owns
 the outer desktop container. The nested graph root therefore survives desktop
 replacement while remaining isolated from the host container database.
+The outer container initializes `/etc/subuid` and `/etc/subgid` from its actual
+namespace maps on every start; these files are runtime configuration and are
+not persistent user state.
 
 Future state outside the home directory must use an explicitly declared named
 volume and be added to this contract before it is relied upon.

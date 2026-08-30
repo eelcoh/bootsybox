@@ -44,7 +44,10 @@ COPY files/usr/local/bin/bootsybox /usr/local/bin/bootsybox
 RUN chmod 0755 \
         /usr/local/bin/bootsybox-container-init \
         /usr/local/bin/bootsybox-session \
-        /usr/local/bin/bootsybox
+        /usr/local/bin/bootsybox \
+    && chmod 4755 \
+        /usr/bin/newuidmap \
+        /usr/bin/newgidmap
 
 LABEL org.opencontainers.image.title="Bootsybox desktop" \
       org.opencontainers.image.description="Reproducible rootless niri desktop for Bootsybox" \
