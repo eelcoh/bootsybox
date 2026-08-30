@@ -18,7 +18,9 @@ image update, rollback or complete outer-container replacement:
 
 Nested Podman deliberately uses
 `$HOME/.local/share/bootsybox/nested-containers/storage`, selected through a
-session-only `CONTAINERS_STORAGE_CONF`. It must not reuse
+session-only `CONTAINERS_STORAGE_CONF`. A separate session-only
+`CONTAINERS_CONF` selects matching file-based log and event backends for nested
+containers. Nested Podman must not reuse
 `$HOME/.local/share/containers/storage`, which belongs to host Podman and owns
 the outer desktop container. The nested graph root therefore survives desktop
 replacement while remaining isolated from the host container database.

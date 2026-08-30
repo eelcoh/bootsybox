@@ -221,7 +221,12 @@ desktop user receives subordinate UID/GID ranges derived from the outer
 container's actual namespace maps so Distrobox can create nested user
 namespaces. The standard `newuidmap` and `newgidmap` helpers are setuid inside
 the deliberately non-isolating outer container so the user can apply those
-ranges. Runtime, networking and lifecycle behavior still require VM acceptance.
+ranges. Nested Podman uses matching file-based logging and event backends so
+Distrobox can follow first-start logs. Runtime, networking and lifecycle
+behavior still require VM acceptance.
+
+Follow-up: start the graphical session in the user's home directory instead of
+the image's `/` working directory.
 
 - Verify rootless Distrobox/Podman nesting, storage, networking and logout.
 - Decide whether nested or host-managed sibling containers are the supported

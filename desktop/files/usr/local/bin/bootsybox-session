@@ -12,6 +12,7 @@ export XDG_SESSION_DESKTOP=niri
 export XDG_CURRENT_DESKTOP=niri
 export LIBSEAT_BACKEND=seatd
 export SEATD_SOCK=/run/seatd.sock
+export CONTAINERS_CONF=/etc/containers/containers-nested.conf
 export XDG_DATA_DIRS="$HOME/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share"
 
 if [ ! -S "$SEATD_SOCK" ]; then

@@ -38,6 +38,7 @@ RUN install -D -m 0644 \
 
 COPY desktop/files/usr/local/bin/bootsybox-container-init /usr/local/bin/bootsybox-container-init
 COPY desktop/files/usr/local/bin/bootsybox-session /usr/local/bin/bootsybox-session
+COPY desktop/files/etc/containers/containers-nested.conf /etc/containers/containers-nested.conf
 COPY desktop/files/etc/containers/storage-nested.conf /etc/containers/storage-nested.conf
 COPY files/usr/local/bin/bootsybox /usr/local/bin/bootsybox
 
