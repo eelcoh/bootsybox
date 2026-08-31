@@ -27,6 +27,9 @@ replacement while remaining isolated from the host container database.
 The outer container initializes `/etc/subuid` and `/etc/subgid` from its actual
 namespace maps on every start; these files are runtime configuration and are
 not persistent user state.
+It also recreates nested Podman's runroot on every outer-container start. The
+runroot contains boot-scoped locks, sockets and the cached boot ID; nested image
+and container state remains in the persistent graph root.
 
 Future state outside the home directory must use an explicitly declared named
 volume and be added to this contract before it is relied upon.

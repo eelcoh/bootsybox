@@ -222,8 +222,10 @@ container's actual namespace maps so Distrobox can create nested user
 namespaces. The standard `newuidmap` and `newgidmap` helpers are setuid inside
 the deliberately non-isolating outer container so the user can apply those
 ranges. Nested Podman uses matching file-based logging and event backends so
-Distrobox can follow first-start logs. Runtime, networking and lifecycle
-behavior still require VM acceptance.
+Distrobox can follow first-start logs. Its transient runroot is recreated on
+each outer-container start so cached boot IDs and runtime locks cannot cross a
+host reboot. Runtime, networking and lifecycle behavior still require VM
+acceptance.
 
 Follow-up: start the graphical session in the user's home directory instead of
 the image's `/` working directory.

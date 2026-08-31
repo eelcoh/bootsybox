@@ -5,6 +5,15 @@ set -euo pipefail
 : "${BOOTSYBOX_UID:?missing BOOTSYBOX_UID}"
 : "${BOOTSYBOX_GID:?missing BOOTSYBOX_GID}"
 
+[[ "$BOOTSYBOX_UID" =~ ^[0-9]+$ ]] || {
+    echo "BOOTSYBOX_UID must be numeric" >&2
+    exit 1
+}
+[[ "$BOOTSYBOX_GID" =~ ^[0-9]+$ ]] || {
+    echo "BOOTSYBOX_GID must be numeric" >&2
+    exit 1
+}
+
 if ! getent group "$BOOTSYBOX_GID" >/dev/null; then
     groupadd --gid "$BOOTSYBOX_GID" "$BOOTSYBOX_USER"
 fi
@@ -56,5 +65,17 @@ install -d \
     -o "$BOOTSYBOX_UID" \
     -g "$BOOTSYBOX_GID" \
     "/run/user/$BOOTSYBOX_UID"
+
+# Podman's runroot contains boot-scoped locks, sockets and a cached boot ID.
+# The outer desktop container's writable layer survives stop/start and may
+# therefore retain stale runtime state across a host reboot. Nested images and
+# container metadata live under the persistent graphroot in the user's home;
+# clearing this runtime-only directory does not remove them.
+rm -rf "/run/user/$BOOTSYBOX_UID/bootsybox-nested-containers/runroot"
+install -d \
+    -m 0700 \
+    -o "$BOOTSYBOX_UID" \
+    -g "$BOOTSYBOX_GID" \
+    "/run/user/$BOOTSYBOX_UID/bootsybox-nested-containers/runroot"
 
 exec sleep infinity
